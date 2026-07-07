@@ -26,13 +26,34 @@ http://localhost:3000
 
 ## Acceso personal
 
-La version publicada en GitHub Pages incluye una puerta de acceso para demo personal.
+La version publicada en Vercel incluye una puerta de acceso para demo personal.
 La contrasena inicial se comparte por separado con la administradora del sistema.
 
-Importante: GitHub Pages publica una app estatica. Este acceso evita entrada casual,
-pero no reemplaza una autenticacion real de servidor. Para datos privados de clientes,
-pagos y contratos, el siguiente paso recomendado es desplegar en Vercel con base de
-datos PostgreSQL y autenticacion server-side.
+Importante: este acceso evita entrada casual, pero la siguiente fase de seguridad es
+mover la autenticacion a servidor con usuarios y roles.
+
+## Vercel + Prisma
+
+Vercel es el hosting principal del sistema. El build ejecuta:
+
+```bash
+prisma generate
+node scripts/vercel-db-push.mjs
+next build
+```
+
+`scripts/vercel-db-push.mjs` solo aplica `prisma db push` dentro de Vercel cuando
+existe `DATABASE_URL`; en local no toca ninguna base de datos.
+
+Variables necesarias en Vercel:
+
+```text
+DATABASE_URL
+AUTH_SECRET
+```
+
+El primer modulo conectado a Prisma es Clientes. Los demas modulos siguen en modo
+demo mientras se migran por fases.
 
 ## Correos y PDF
 
@@ -80,4 +101,6 @@ prisma/
 4. Ejecutar `npx prisma migrate dev`.
 5. Reemplazar datos mock del dashboard por consultas reales.
 6. Crear rutas CRUD para clientes, eventos, proveedores, cotizaciones y pagos.
-7. Mover el login de demo a autenticacion real con usuarios y roles.
+7. Migrar Eventos a Prisma.
+8. Migrar Finanzas, pagos y alertas automaticas.
+9. Mover el login de demo a autenticacion real con usuarios y roles.

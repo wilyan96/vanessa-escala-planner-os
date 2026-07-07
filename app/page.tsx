@@ -2195,6 +2195,9 @@ export default function Home() {
   const [templates, setTemplates] = useState<EmailTemplate[]>(initialTemplates);
   const [payments, setPayments] = useState<Payment[]>(initialPayments);
   const [dismissedAlerts, setDismissedAlerts] = useState<string[]>([]);
+  const [clientSyncStatus, setClientSyncStatus] = useState<
+    "demo" | "error" | "loading" | "synced"
+  >("demo");
 
   const [selectedClientId, setSelectedClientId] = useState(initialClients[0].id);
   const [selectedEventId, setSelectedEventId] = useState(initialEvents[0].id);
@@ -2260,6 +2263,35 @@ export default function Home() {
     return () => window.removeEventListener("hashchange", syncFromHash);
   }, [isAuthenticated]);
 
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    let isCurrent = true;
+    setClientSyncStatus("loading");
+
+    fetch("/api/clients")
+      .then((response) => {
+        if (!response.ok) throw new Error("No se pudieron cargar clientes");
+        return response.json() as Promise<Client[]>;
+      })
+      .then((databaseClients) => {
+        if (!isCurrent) return;
+        setClientSyncStatus("synced");
+        if (databaseClients.length > 0) {
+          setClients(databaseClients);
+          setSelectedClientId(databaseClients[0].id);
+        }
+      })
+      .catch(() => {
+        if (!isCurrent) return;
+        setClientSyncStatus("error");
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [isAuthenticated]);
+
   function openModule(moduleId: ModuleId) {
     setActiveModule(moduleId);
     window.history.replaceState(null, "", `#${moduleId}`);
@@ -2301,6 +2333,62 @@ export default function Home() {
   function logout() {
     window.localStorage.removeItem(AUTH_STORAGE_KEY);
     setIsAuthenticated(false);
+  }
+
+  async function saveClient(client: Client) {
+    const previousClients = clients;
+    const isEditing = Boolean(client.id);
+    const optimisticClient = isEditing ? client : { ...client, id: makeId("cl") };
+
+    setClients((current) =>
+      isEditing
+        ? current.map((item) => (item.id === client.id ? client : item))
+        : [...current, optimisticClient]
+    );
+
+    try {
+      const response = await fetch(
+        isEditing ? `/api/clients/${client.id}` : "/api/clients",
+        {
+          body: JSON.stringify(client),
+          headers: {
+            "Content-Type": "application/json"
+          },
+          method: isEditing ? "PUT" : "POST"
+        }
+      );
+      if (!response.ok) throw new Error("No se pudo guardar el cliente");
+      const savedClient = (await response.json()) as Client;
+      setClients((current) =>
+        isEditing
+          ? current.map((item) => (item.id === savedClient.id ? savedClient : item))
+          : current.map((item) =>
+              item.id === optimisticClient.id ? savedClient : item
+            )
+      );
+      setSelectedClientId(savedClient.id);
+      setClientSyncStatus("synced");
+    } catch {
+      setClients(previousClients);
+      setClientSyncStatus("error");
+    }
+  }
+
+  async function deleteClient(id: string) {
+    const previousClients = clients;
+    setClients((current) => current.filter((item) => item.id !== id));
+    if (selectedClientId === id) setSelectedClientId(clients[0]?.id ?? "");
+
+    try {
+      const response = await fetch(`/api/clients/${id}`, {
+        method: "DELETE"
+      });
+      if (!response.ok) throw new Error("No se pudo eliminar el cliente");
+      setClientSyncStatus("synced");
+    } catch {
+      setClients(previousClients);
+      setClientSyncStatus("error");
+    }
   }
 
   if (!isAuthenticated) {
@@ -2400,18 +2488,10 @@ export default function Home() {
         {activeModule === "clients" && (
           <ClientsView
             clients={filteredClients}
+            syncStatus={clientSyncStatus}
             filter={clientFilter}
-            onDelete={(id) => {
-              setClients((current) => current.filter((item) => item.id !== id));
-              if (selectedClientId === id) setSelectedClientId(clients[0]?.id ?? "");
-            }}
-            onSave={(client) => {
-              setClients((current) =>
-                client.id
-                  ? current.map((item) => (item.id === client.id ? client : item))
-                  : [...current, { ...client, id: makeId("cl") }]
-              );
-            }}
+            onDelete={deleteClient}
+            onSave={saveClient}
             selectedClient={selectedClient}
             setFilter={setClientFilter}
             setSelectedClientId={setSelectedClientId}
@@ -2866,15 +2946,17 @@ function ClientsView({
   onSave,
   selectedClient,
   setFilter,
-  setSelectedClientId
+  setSelectedClientId,
+  syncStatus
 }: Readonly<{
   clients: Client[];
   filter: string;
-  onDelete: (id: string) => void;
-  onSave: (client: Client) => void;
+  onDelete: (id: string) => Promise<void> | void;
+  onSave: (client: Client) => Promise<void> | void;
   selectedClient?: Client;
   setFilter: (value: string) => void;
   setSelectedClientId: (value: string) => void;
+  syncStatus: "demo" | "error" | "loading" | "synced";
 }>) {
   const [draft, setDraft] = useState<Client>(blankClient);
 
@@ -2902,6 +2984,25 @@ function ClientsView({
           </select>
         }
       >
+        <div className="sync-banner">
+          <Status
+            label={
+              syncStatus === "synced"
+                ? "Clientes conectados a Prisma"
+                : syncStatus === "loading"
+                  ? "Sincronizando clientes"
+                  : syncStatus === "error"
+                    ? "Clientes en modo demo"
+                    : "Clientes demo"
+            }
+            tone={syncStatus === "synced" ? "success" : syncStatus === "error" ? "warning" : "neutral"}
+          />
+          <span>
+            {syncStatus === "synced"
+              ? "Los cambios de este modulo se guardan en la base de datos."
+              : "Cuando Prisma este inicializado, este modulo guardara los cambios automaticamente."}
+          </span>
+        </div>
         <DataTable
           headers={["Cliente", "Evento", "Fecha", "Estado", "Acciones"]}
           rows={clients.map((client) => [
