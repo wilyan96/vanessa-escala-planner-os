@@ -14,14 +14,19 @@ import {
   FileSignature,
   FolderOpen,
   Handshake,
+  Eye,
+  EyeOff,
   LayoutDashboard,
+  Lock,
+  LogOut,
   Mail,
-  MessageCircle,
   MoreHorizontal,
+  Paperclip,
   Plus,
   Save,
   Search,
   Send,
+  ShieldCheck,
   Trash2,
   Upload,
   UsersRound,
@@ -289,6 +294,15 @@ type AutomationSnapshot = {
     receivables: number;
   };
 };
+
+const APP_PASSWORD_HASH =
+  "12476a5da8dc634d28e04f0e423c3175f49624239d029e5884c7599a056ab723";
+const AUTH_STORAGE_KEY = "vanessa-planner-authenticated";
+const PUBLIC_BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+
+function publicAssetPath(path: string) {
+  return `${PUBLIC_BASE_PATH}${path}`;
+}
 
 const nav = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -730,7 +744,7 @@ const initialTimeline: TimelineItem[] = [
     vendorConfirmed: true,
     confirmationDate: "04 jul 2026",
     confirmationBy: "Carlos Ruiz",
-    confirmationMethod: "WhatsApp",
+    confirmationMethod: "Correo",
     confirmationNotes: "Confirmo 6 personas para montaje.",
     history: ["02 jul 2026 - Actividad creada.", "04 jul 2026 - Proveedor confirmo horario."],
     status: "Confirmado"
@@ -1321,7 +1335,7 @@ const blankTimelineItem: TimelineItem = {
   vendorConfirmed: false,
   confirmationDate: "",
   confirmationBy: "",
-  confirmationMethod: "WhatsApp",
+  confirmationMethod: "Correo",
   confirmationNotes: "",
   history: [],
   status: "Pendiente"
@@ -1361,11 +1375,6 @@ function quoteTotals(quote: Quote) {
   const tax = quote.items.reduce((sum, item) => sum + item.tax, 0);
   const total = quote.items.reduce((sum, item) => sum + quoteItemTotal(item), 0);
   return { discount, subtotal, tax, total };
-}
-
-function quoteShareText(quote: Quote) {
-  const quoteNumber = quote.quoteNumber || "cotizacion";
-  return `Hola ${quote.client || ""}, te comparto la cotizacion ${quoteNumber} para ${quote.event || "tu evento"}. Total: ${money(quoteTotals(quote).total)}.`;
 }
 
 function nextContractNumber(contracts: Contract[]) {
@@ -1566,6 +1575,70 @@ function currencyToNumber(value: string) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+async function sha256(value: string) {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function openMailClient(to: string, subject: string, body: string) {
+  const mailto = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(
+    subject
+  )}&body=${encodeURIComponent(body)}`;
+  window.location.href = mailto;
+}
+
+function quotePdfLines(quote: Quote) {
+  const totals = quoteTotals(quote);
+  return [
+    quote.quoteNumber || "Cotizacion sin numero",
+    `Cliente: ${quote.client || "-"}`,
+    `Correo: ${quote.clientEmail || "-"}`,
+    `Evento: ${quote.event || "-"}`,
+    `Lugar: ${quote.eventPlace || "-"}`,
+    `Metodo de pago: ${quote.paymentMethod}`,
+    `Estado: ${quote.status}`,
+    `Vence: ${quote.expires || "-"}`,
+    "",
+    "Servicios:",
+    ...quote.items.map(
+      (item, index) =>
+        `${quoteItemReference(index)} - ${item.description || "Servicio"} - ${item.quantity} ${item.unit} - ${money(quoteItemTotal(item))}`
+    ),
+    "",
+    `Subtotal: ${money(totals.subtotal)}`,
+    `Descuento: ${money(totals.discount)}`,
+    `Impuestos: ${money(totals.tax)}`,
+    `Total: ${money(totals.total)}`,
+    "",
+    "Observaciones:",
+    quote.observations || "-"
+  ];
+}
+
+function emailQuoteWithPdf(quote: Quote) {
+  const quoteNumber = quote.quoteNumber || "cotizacion";
+  const filename = `${quoteNumber.toLowerCase()}.pdf`;
+  downloadPdf(`Cotizacion ${quoteNumber}`, quotePdfLines(quote), filename);
+  openMailClient(
+    quote.clientEmail,
+    `Cotizacion ${quoteNumber}`.trim(),
+    [
+      `Hola ${quote.client || ""},`,
+      "",
+      `Te comparto la cotizacion ${quoteNumber} para ${quote.event || "tu evento"}.`,
+      `Total: ${money(quoteTotals(quote).total)}.`,
+      "",
+      `El PDF se descargo como ${filename}; adjuntalo a este correo antes de enviarlo.`,
+      "",
+      "Quedo atenta a tus comentarios.",
+      "Vanessa Escala Wedding & Events Planner"
+    ].join("\n")
+  );
+}
+
 function downloadDocx(title: string, html: string, filename: string) {
   const documentHtml = `
     <html>
@@ -1667,6 +1740,99 @@ function statusToneFromLabel(status: string): StatusTone {
   }
   if (normalized.includes("enviada") || normalized.includes("enviado")) return "blue";
   return "neutral";
+}
+
+function LoginScreen({
+  authReady,
+  onLogin
+}: Readonly<{
+  authReady: boolean;
+  onLogin: () => void;
+}>) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [isChecking, setIsChecking] = useState(false);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setError("");
+    setIsChecking(true);
+
+    try {
+      const hash = await sha256(password);
+      if (hash !== APP_PASSWORD_HASH) {
+        setError("Contrasena incorrecta.");
+        return;
+      }
+
+      window.localStorage.setItem(AUTH_STORAGE_KEY, "true");
+      onLogin();
+    } finally {
+      setIsChecking(false);
+    }
+  }
+
+  return (
+    <main className="login-shell">
+      <section className="login-panel" aria-label="Acceso Vanessa Escala Planner OS">
+        <div className="login-brand">
+          <img
+            alt="Vanessa Escala Wedding & Events Planner"
+            className="brand-logo"
+            src={publicAssetPath("/logo-vanessa.png")}
+          />
+          <div>
+            <p className="eyebrow">Acceso privado</p>
+            <h1>Vanessa Escala Planner OS</h1>
+          </div>
+        </div>
+
+        <p className="lead">
+          Plataforma interna para gestionar eventos, clientes, pagos, proveedores,
+          contratos, documentos y alertas operativas.
+        </p>
+
+        <form className="login-form" onSubmit={submit}>
+          <label className="field">
+            <span>Contrasena</span>
+            <div className="password-control">
+              <Lock size={17} aria-hidden="true" />
+              <input
+                autoComplete="current-password"
+                autoFocus
+                disabled={!authReady || isChecking}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="Ingresa la contrasena"
+                type={showPassword ? "text" : "password"}
+                value={password}
+              />
+              <button
+                className="icon-button"
+                onClick={() => setShowPassword((current) => !current)}
+                title={showPassword ? "Ocultar contrasena" : "Mostrar contrasena"}
+                type="button"
+              >
+                {showPassword ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
+              </button>
+            </div>
+          </label>
+
+          {error && <p className="form-error">{error}</p>}
+
+          <button className="button primary login-button" disabled={!password || isChecking || !authReady} type="submit">
+            <ShieldCheck size={18} aria-hidden="true" />
+            Entrar
+          </button>
+        </form>
+
+        <div className="login-note">
+          <strong>Demo personal protegida</strong>
+          <span>Para seguridad avanzada con usuarios reales, el siguiente paso es migrar el login a backend.</span>
+        </div>
+      </section>
+    </main>
+  );
 }
 
 const monthNames: Record<string, number> = {
@@ -2014,6 +2180,8 @@ class AutomationEngine {
 }
 
 export default function Home() {
+  const [authReady, setAuthReady] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activeModule, setActiveModule] = useState<ModuleId>("dashboard");
   const [globalQuery, setGlobalQuery] = useState("");
 
@@ -2076,6 +2244,13 @@ export default function Home() {
   const header = moduleCopy[activeModule];
 
   useEffect(() => {
+    setIsAuthenticated(window.localStorage.getItem(AUTH_STORAGE_KEY) === "true");
+    setAuthReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
     function syncFromHash() {
       setActiveModule(moduleFromHash());
     }
@@ -2083,7 +2258,7 @@ export default function Home() {
     syncFromHash();
     window.addEventListener("hashchange", syncFromHash);
     return () => window.removeEventListener("hashchange", syncFromHash);
-  }, []);
+  }, [isAuthenticated]);
 
   function openModule(moduleId: ModuleId) {
     setActiveModule(moduleId);
@@ -2111,10 +2286,25 @@ export default function Home() {
 
   function sendEmail() {
     if (!selectedTemplate || !selectedClient) return;
+    const subject = selectedTemplate.subject.replaceAll("{{cliente}}", selectedClient.name);
+    const body = selectedTemplate.body
+      .replaceAll("{{cliente}}", selectedClient.name)
+      .replaceAll("{{evento}}", selectedClient.event)
+      .replaceAll("{{fecha}}", selectedClient.date);
+    openMailClient(selectedClient.email, subject, body);
     setEmailHistory((current) => [
-      `${selectedTemplate.name} enviada a ${selectedClient.name}`,
+      `${selectedTemplate.name} preparada para ${selectedClient.name}`,
       ...current
     ]);
+  }
+
+  function logout() {
+    window.localStorage.removeItem(AUTH_STORAGE_KEY);
+    setIsAuthenticated(false);
+  }
+
+  if (!isAuthenticated) {
+    return <LoginScreen authReady={authReady} onLogin={() => setIsAuthenticated(true)} />;
   }
 
   return (
@@ -2124,7 +2314,7 @@ export default function Home() {
           <img
             alt="Vanessa Escala Wedding & Events Planner"
             className="brand-logo"
-            src="/logo-vanessa.png"
+            src={publicAssetPath("/logo-vanessa.png")}
           />
           <div>
             <strong>Vanessa Escala</strong>
@@ -2182,6 +2372,10 @@ export default function Home() {
             >
               <Plus size={18} aria-hidden="true" />
               Nuevo evento
+            </button>
+            <button className="button" onClick={logout} type="button">
+              <LogOut size={18} aria-hidden="true" />
+              Salir
             </button>
           </div>
         </header>
@@ -2559,7 +2753,7 @@ function DashboardView({
                 client.nextAction,
                 client.followDate,
                 client.probability,
-                <div className="row-actions" key="send"><button className="icon-button" title="Enviar correo" type="button"><Mail size={15} aria-hidden="true" /></button><button className="icon-button" title="Enviar WhatsApp" type="button"><MessageCircle size={15} aria-hidden="true" /></button></div>
+                <div className="row-actions" key="send"><button className="icon-button" title="Enviar correo" type="button"><Mail size={15} aria-hidden="true" /></button></div>
               ])}
             />
           </Panel>
@@ -3471,28 +3665,6 @@ function QuoteTableActions({
   onPrint: () => void;
   quote: Quote;
 }>) {
-  const shareText = quoteShareText(quote);
-  const encodedText = encodeURIComponent(shareText);
-  const mailSubject = encodeURIComponent(`Cotizacion ${quote.quoteNumber || ""}`.trim());
-
-  async function openNativeShare() {
-    try {
-      if (typeof navigator !== "undefined" && navigator.share) {
-        await navigator.share({
-          text: shareText,
-          title: `Cotizacion ${quote.quoteNumber || ""}`.trim()
-        });
-        return;
-      }
-
-      if (typeof navigator !== "undefined" && navigator.clipboard) {
-        await navigator.clipboard.writeText(shareText);
-      }
-    } catch {
-      // Share can be cancelled by the user; no UI state needs to change.
-    }
-  }
-
   return (
     <div className="quote-table-actions">
       <button className="button compact-action" onClick={onEdit} type="button">
@@ -3506,26 +3678,14 @@ function QuoteTableActions({
           Enviar
         </summary>
         <div className="action-menu-panel">
-          <button className="menu-action" onClick={openNativeShare} type="button">
-            <Send size={15} aria-hidden="true" />
-            Compartir
+          <button
+            className="menu-action"
+            onClick={() => emailQuoteWithPdf(quote)}
+            type="button"
+          >
+            <Paperclip size={15} aria-hidden="true" />
+            Correo + PDF
           </button>
-          <a
-            className="menu-action"
-            href={`mailto:${quote.clientEmail}?subject=${mailSubject}&body=${encodedText}`}
-          >
-            <Mail size={15} aria-hidden="true" />
-            Correo
-          </a>
-          <a
-            className="menu-action"
-            href={`https://wa.me/?text=${encodedText}`}
-            rel="noreferrer"
-            target="_blank"
-          >
-            <MessageCircle size={15} aria-hidden="true" />
-            WhatsApp
-          </a>
         </div>
       </details>
 
@@ -3571,7 +3731,7 @@ function QuotePreview({ quote }: Readonly<{ quote: Quote }>) {
       </div>
       <article className="quote-paper" id="quote-paper-preview">
         <header className="quote-header">
-          <img alt="Vanessa Escala" src="/logo-vanessa.png" />
+          <img alt="Vanessa Escala" src={publicAssetPath("/logo-vanessa.png")} />
           <h2>COTIZACION</h2>
           <table>
             <tbody>
@@ -3988,7 +4148,7 @@ function ContractPreview({ contract }: Readonly<{ contract: Contract }>) {
     <Panel title="Vista previa legal">
       <article className="contract-preview">
         <header className="contract-preview-header">
-          <img alt="Vanessa Escala" src="/logo-vanessa.png" />
+          <img alt="Vanessa Escala" src={publicAssetPath("/logo-vanessa.png")} />
           <div>
             <p className="eyebrow">Documento legal</p>
             <h2>{contract.name || contract.template}</h2>

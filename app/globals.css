@@ -49,6 +49,87 @@ button:disabled {
   opacity: 0.45;
 }
 
+.login-shell {
+  align-items: center;
+  background:
+    linear-gradient(135deg, rgba(17, 17, 17, 0.95), rgba(184, 135, 43, 0.62)),
+    var(--black);
+  display: grid;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.login-panel {
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.54);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 18px;
+  margin: 0 auto;
+  max-width: 520px;
+  padding: 26px;
+  width: min(100%, 520px);
+}
+
+.login-brand {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+}
+
+.login-brand h1 {
+  font-size: 30px;
+  margin-bottom: 0;
+}
+
+.login-form {
+  display: grid;
+  gap: 12px;
+}
+
+.password-control {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  min-height: 42px;
+  padding: 0 8px 0 12px;
+}
+
+.password-control input {
+  border: 0;
+  min-width: 0;
+  outline: 0;
+}
+
+.login-button {
+  min-height: 42px;
+}
+
+.form-error {
+  color: var(--danger);
+  font-weight: 700;
+  margin: 0;
+}
+
+.login-note {
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+}
+
+.login-note span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: 248px minmax(0, 1fr);
