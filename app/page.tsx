@@ -1543,24 +1543,21 @@ function createPdfDocument(title: string, lines: string[]) {
   return pdf;
 }
 
-function pdfDataUri(title: string, lines: string[]) {
-  return `data:application/pdf;charset=utf-8,${encodeURIComponent(
-    createPdfDocument(title, lines)
-  )}`;
-}
-
 function downloadPdf(title: string, lines: string[], filename: string) {
   const pdf = createPdfDocument(title, lines);
-
   const blob = new Blob([pdf], { type: "application/pdf" });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
+
   anchor.href = url;
   anchor.download = filename;
+  anchor.rel = "noopener";
+  anchor.style.display = "none";
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
-  URL.revokeObjectURL(url);
+
+  window.setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
 function money(value: number) {
@@ -1622,21 +1619,24 @@ function emailQuoteWithPdf(quote: Quote) {
   const quoteNumber = quote.quoteNumber || "cotizacion";
   const filename = `${quoteNumber.toLowerCase()}.pdf`;
   downloadPdf(`Cotizacion ${quoteNumber}`, quotePdfLines(quote), filename);
-  openMailClient(
-    quote.clientEmail,
-    `Cotizacion ${quoteNumber}`.trim(),
-    [
-      `Hola ${quote.client || ""},`,
-      "",
-      `Te comparto la cotizacion ${quoteNumber} para ${quote.event || "tu evento"}.`,
-      `Total: ${money(quoteTotals(quote).total)}.`,
-      "",
-      `El PDF se descargo como ${filename}; adjuntalo a este correo antes de enviarlo.`,
-      "",
-      "Quedo atenta a tus comentarios.",
-      "Vanessa Escala Wedding & Events Planner"
-    ].join("\n")
-  );
+
+  window.setTimeout(() => {
+    openMailClient(
+      quote.clientEmail,
+      `Cotizacion ${quoteNumber}`.trim(),
+      [
+        `Hola ${quote.client || ""},`,
+        "",
+        `Te comparto la cotizacion ${quoteNumber} para ${quote.event || "tu evento"}.`,
+        `Total: ${money(quoteTotals(quote).total)}.`,
+        "",
+        `El PDF se descargo como ${filename}; adjuntalo a este correo antes de enviarlo.`,
+        "",
+        "Quedo atenta a tus comentarios.",
+        "Vanessa Escala Wedding & Events Planner"
+      ].join("\n")
+    );
+  }, 400);
 }
 
 function downloadDocx(title: string, html: string, filename: string) {
@@ -5152,14 +5152,14 @@ function PdfButton({
   title: string;
 }>) {
   return (
-    <a
+    <button
       className="icon-button"
-      download={filename}
-      href={pdfDataUri(title, lines)}
+      onClick={() => downloadPdf(title, lines, filename)}
       title="Descargar PDF"
+      type="button"
     >
       <Download size={16} aria-hidden="true" />
-    </a>
+    </button>
   );
 }
 
