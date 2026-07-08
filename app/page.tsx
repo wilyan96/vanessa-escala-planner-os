@@ -299,6 +299,7 @@ const APP_PASSWORD_HASH =
   "12476a5da8dc634d28e04f0e423c3175f49624239d029e5884c7599a056ab723";
 const AUTH_STORAGE_KEY = "vanessa-planner-authenticated";
 const PUBLIC_BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+const RECEIPT_START_NUMBER = 250;
 
 function publicAssetPath(path: string) {
   return `${PUBLIC_BASE_PATH}${path}`;
@@ -1543,9 +1544,7 @@ function createPdfDocument(title: string, lines: string[]) {
   return pdf;
 }
 
-function downloadPdf(title: string, lines: string[], filename: string) {
-  const pdf = createPdfDocument(title, lines);
-  const blob = new Blob([pdf], { type: "application/pdf" });
+function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
 
@@ -1558,6 +1557,317 @@ function downloadPdf(title: string, lines: string[], filename: string) {
   anchor.remove();
 
   window.setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
+function downloadPdf(title: string, lines: string[], filename: string) {
+  const pdf = createPdfDocument(title, lines);
+  downloadBlob(new Blob([pdf], { type: "application/pdf" }), filename);
+}
+
+function bytesFromAscii(value: string) {
+  return new TextEncoder().encode(value);
+}
+
+function concatBytes(chunks: Uint8Array[]) {
+  const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const output = new Uint8Array(totalLength);
+  let offset = 0;
+
+  chunks.forEach((chunk) => {
+    output.set(chunk, offset);
+    offset += chunk.length;
+  });
+
+  return output;
+}
+
+function dataUrlToBytes(dataUrl: string) {
+  const base64 = dataUrl.split(",")[1] ?? "";
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return bytes;
+}
+
+function createJpegPagePdf(jpegBytes: Uint8Array) {
+  const chunks: Uint8Array[] = [];
+  const offsets: number[] = [0];
+  let byteLength = 0;
+  let objectCount = 0;
+
+  function write(chunk: string | Uint8Array) {
+    const bytes = typeof chunk === "string" ? bytesFromAscii(chunk) : chunk;
+    chunks.push(bytes);
+    byteLength += bytes.length;
+  }
+
+  function addObject(parts: Array<string | Uint8Array>) {
+    objectCount += 1;
+    offsets.push(byteLength);
+    write(`${objectCount} 0 obj\n`);
+    parts.forEach(write);
+    write("\nendobj\n");
+  }
+
+  const pageContent = "q\n612 0 0 792 0 0 cm\n/Im1 Do\nQ";
+
+  write("%PDF-1.4\n");
+  addObject(["<< /Type /Catalog /Pages 2 0 R >>"]);
+  addObject(["<< /Type /Pages /Kids [3 0 R] /Count 1 >>"]);
+  addObject([
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /XObject << /Im1 5 0 R >> >> /Contents 4 0 R >>"
+  ]);
+  addObject([`<< /Length ${pageContent.length} >>\nstream\n${pageContent}\nendstream`]);
+  addObject([
+    `<< /Type /XObject /Subtype /Image /Width 1275 /Height 1650 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpegBytes.length} >>\nstream\n`,
+    jpegBytes,
+    "\nendstream"
+  ]);
+
+  const xrefOffset = byteLength;
+  write(`xref\n0 ${objectCount + 1}\n0000000000 65535 f \n`);
+  offsets.slice(1).forEach((offset) => {
+    write(`${offset.toString().padStart(10, "0")} 00000 n \n`);
+  });
+  write(`trailer\n<< /Size ${objectCount + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
+
+  return new Blob([concatBytes(chunks)], { type: "application/pdf" });
+}
+
+function loadReceiptLogo() {
+  return new Promise<HTMLImageElement | null>((resolve) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => resolve(null);
+    image.src = publicAssetPath("/logo-vanessa.png");
+  });
+}
+
+function drawWrappedCanvasText(
+  context: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  lineHeight: number
+) {
+  const words = text.split(" ");
+  let line = "";
+  let currentY = y;
+
+  words.forEach((word) => {
+    const next = line ? `${line} ${word}` : word;
+    if (context.measureText(next).width > maxWidth && line) {
+      context.fillText(line, x, currentY);
+      line = word;
+      currentY += lineHeight;
+    } else {
+      line = next;
+    }
+  });
+
+  if (line) context.fillText(line, x, currentY);
+  return currentY + lineHeight;
+}
+
+function receiptNumberForPayment(payments: Payment[], paymentId: string) {
+  const index = payments.findIndex((payment) => payment.id === paymentId);
+  return `REC-${RECEIPT_START_NUMBER + Math.max(index, 0)}`;
+}
+
+function safeFilename(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+async function createPaymentReceiptPdf(
+  eventRecord: EventRecord,
+  payment: Payment,
+  receiptNumber: string
+) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1275;
+  canvas.height = 1650;
+  const context = canvas.getContext("2d");
+
+  if (!context) return null;
+
+  const logo = await loadReceiptLogo();
+  const paidAmount = payment.paid;
+  const pendingAmount = Math.max(payment.amount - payment.paid, 0);
+  const issuedAt = new Intl.DateTimeFormat("es-PA", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric"
+  }).format(new Date());
+
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#111827";
+  context.fillRect(0, 0, canvas.width, 26);
+  context.fillStyle = "#c8a95b";
+  context.fillRect(0, 26, canvas.width, 8);
+
+  if (logo) {
+    context.drawImage(logo, 96, 78, 138, 138);
+  } else {
+    context.fillStyle = "#111827";
+    context.fillRect(96, 78, 138, 138);
+    context.fillStyle = "#c8a95b";
+    context.font = "bold 42px Arial";
+    context.fillText("VE", 132, 162);
+  }
+
+  context.fillStyle = "#111827";
+  context.font = "bold 42px Arial";
+  context.fillText("Vanessa Escala Planner OS", 260, 118);
+  context.font = "24px Arial";
+  context.fillStyle = "#4b5563";
+  context.fillText("Wedding & Events Planner", 260, 158);
+  context.fillText("vanessaescalaplanner@gmail.com", 260, 194);
+
+  context.textAlign = "right";
+  context.fillStyle = "#111827";
+  context.font = "bold 54px Arial";
+  context.fillText("RECIBO DE PAGO", 1178, 122);
+  context.fillStyle = "#c8a95b";
+  context.font = "bold 36px Arial";
+  context.fillText(receiptNumber, 1178, 174);
+  context.fillStyle = "#4b5563";
+  context.font = "24px Arial";
+  context.fillText(`Emision: ${issuedAt}`, 1178, 212);
+  context.textAlign = "left";
+
+  context.strokeStyle = "#d1d5db";
+  context.lineWidth = 2;
+  context.strokeRect(96, 280, 1082, 252);
+
+  context.fillStyle = "#f9fafb";
+  context.fillRect(96, 280, 1082, 58);
+  context.fillStyle = "#111827";
+  context.font = "bold 28px Arial";
+  context.fillText("Datos del cliente y evento", 126, 319);
+
+  const details = [
+    ["Recibido de", eventRecord.clientName],
+    ["Correo", eventRecord.clientEmail || "-"],
+    ["Evento", eventRecord.name],
+    ["Numero de evento", eventRecord.eventNumber],
+    ["Lugar", eventRecord.venue || "-"],
+    ["Fecha del evento", eventRecord.date]
+  ];
+
+  details.forEach(([label, value], index) => {
+    const column = index % 2;
+    const row = Math.floor(index / 2);
+    const x = 126 + column * 520;
+    const y = 382 + row * 56;
+    context.fillStyle = "#6b7280";
+    context.font = "bold 18px Arial";
+    context.fillText(label.toUpperCase(), x, y);
+    context.fillStyle = "#111827";
+    context.font = "24px Arial";
+    drawWrappedCanvasText(context, value, x, y + 30, 440, 28);
+  });
+
+  context.fillStyle = "#111827";
+  context.font = "bold 34px Arial";
+  context.fillText("Detalle del pago", 96, 622);
+
+  const tableX = 96;
+  const tableY = 670;
+  const tableWidth = 1082;
+  const rowHeight = 74;
+  const columns = [360, 190, 190, 190, 152];
+  const headers = ["Concepto", "Monto", "Recibido", "Saldo", "Estado"];
+  const values = [
+    payment.concept,
+    money(payment.amount),
+    money(paidAmount),
+    money(pendingAmount),
+    payment.status
+  ];
+  let currentX = tableX;
+
+  context.fillStyle = "#111827";
+  context.fillRect(tableX, tableY, tableWidth, rowHeight);
+  context.fillStyle = "#ffffff";
+  context.font = "bold 20px Arial";
+  headers.forEach((header, index) => {
+    context.fillText(header, currentX + 18, tableY + 45);
+    currentX += columns[index];
+  });
+
+  context.strokeStyle = "#d1d5db";
+  context.strokeRect(tableX, tableY + rowHeight, tableWidth, rowHeight);
+  currentX = tableX;
+  context.fillStyle = "#111827";
+  context.font = "22px Arial";
+  values.forEach((value, index) => {
+    drawWrappedCanvasText(context, value, currentX + 18, tableY + rowHeight + 45, columns[index] - 30, 26);
+    currentX += columns[index];
+  });
+
+  context.fillStyle = "#f7f3e8";
+  context.fillRect(96, 900, 1082, 180);
+  context.fillStyle = "#111827";
+  context.font = "bold 30px Arial";
+  context.fillText("Monto recibido", 132, 956);
+  context.fillStyle = "#9a7a21";
+  context.font = "bold 68px Arial";
+  context.fillText(money(paidAmount), 132, 1042);
+  context.fillStyle = "#374151";
+  context.font = "24px Arial";
+  context.fillText(`Metodo de pago: ${eventRecord.paymentMethod || "-"}`, 710, 962);
+  context.fillText(`Fecha de referencia: ${payment.dueDate || "-"}`, 710, 1004);
+  context.fillText(`Estado financiero del evento: ${eventRecord.paymentStatus || "-"}`, 710, 1046);
+
+  context.fillStyle = "#111827";
+  context.font = "bold 28px Arial";
+  context.fillText("Nota", 96, 1178);
+  context.fillStyle = "#374151";
+  context.font = "24px Arial";
+  drawWrappedCanvasText(
+    context,
+    "Este recibo confirma el pago registrado en Vanessa Escala Planner OS. Conserva este documento como comprobante administrativo del evento indicado.",
+    96,
+    1222,
+    1082,
+    34
+  );
+
+  context.strokeStyle = "#111827";
+  context.lineWidth = 2;
+  context.beginPath();
+  context.moveTo(760, 1428);
+  context.lineTo(1178, 1428);
+  context.stroke();
+  context.fillStyle = "#111827";
+  context.font = "22px Arial";
+  context.fillText("Vanessa Escala Wedding & Events Planner", 760, 1466);
+
+  context.fillStyle = "#6b7280";
+  context.font = "18px Arial";
+  context.fillText("Documento generado automaticamente por Vanessa Escala Planner OS.", 96, 1538);
+
+  const jpegBytes = dataUrlToBytes(canvas.toDataURL("image/jpeg", 0.94));
+  return createJpegPagePdf(jpegBytes);
+}
+
+async function downloadPaymentReceiptPdf(
+  eventRecord: EventRecord,
+  payment: Payment,
+  receiptNumber: string
+) {
+  const receipt = await createPaymentReceiptPdf(eventRecord, payment, receiptNumber);
+  if (!receipt) return;
+  downloadBlob(receipt, `${safeFilename(receiptNumber)}-${safeFilename(eventRecord.clientName)}.pdf`);
 }
 
 function money(value: number) {
@@ -3219,7 +3529,7 @@ function EventsView({
           <Panel title={draft.id ? "Editar evento" : "Nuevo evento"}>
             <EventForm draft={draft} onCancel={() => setDraft(blankEvent)} onChange={setDraft} onSubmit={submit} />
           </Panel>
-          {selectedEvent && <EventDigitalFolder eventRecord={selectedEvent} eventContracts={eventContracts} eventPayments={eventPayments} eventTimeline={eventTimeline} onOpenModule={onOpenModule} selectedAlerts={selectedAlerts} />}
+          {selectedEvent && <EventDigitalFolder allPayments={payments} eventRecord={selectedEvent} eventContracts={eventContracts} eventPayments={eventPayments} eventTimeline={eventTimeline} onOpenModule={onOpenModule} selectedAlerts={selectedAlerts} />}
         </div>
       </section>
     </section>
@@ -3227,6 +3537,7 @@ function EventsView({
 }
 
 function EventDigitalFolder({
+  allPayments,
   eventContracts,
   eventPayments,
   eventRecord,
@@ -3234,6 +3545,7 @@ function EventDigitalFolder({
   onOpenModule,
   selectedAlerts
 }: Readonly<{
+  allPayments: Payment[];
   eventContracts: Contract[];
   eventPayments: Payment[];
   eventRecord: EventRecord;
@@ -3296,7 +3608,30 @@ function EventDigitalFolder({
             <Detail label="Pagos pendientes proveedores" value={money(providerPending)} />
             <Detail label="Ganancia estimada" value={money(estimatedProfit)} />
             <Detail label="Estado financiero" value={eventRecord.paymentStatus} />
-            <DataTable headers={["Concepto", "Monto", "Pagado", "Estado"]} rows={eventPayments.map((payment) => [payment.concept, money(payment.amount), money(payment.paid), payment.status])} />
+            <DataTable
+              headers={["Recibo", "Concepto", "Monto", "Pagado", "Saldo", "Estado", "PDF"]}
+              rows={eventPayments.map((payment) => {
+                const receiptNumber = receiptNumberForPayment(allPayments, payment.id);
+                return [
+                  receiptNumber,
+                  payment.concept,
+                  money(payment.amount),
+                  money(payment.paid),
+                  money(Math.max(payment.amount - payment.paid, 0)),
+                  payment.status,
+                  <button
+                    className="icon-button"
+                    disabled={payment.paid <= 0}
+                    key="receipt"
+                    onClick={() => void downloadPaymentReceiptPdf(eventRecord, payment, receiptNumber)}
+                    title={payment.paid > 0 ? "Descargar recibo de pago" : "Registra un pago para generar recibo"}
+                    type="button"
+                  >
+                    <Download size={15} aria-hidden="true" />
+                  </button>
+                ];
+              })}
+            />
           </section>
           <section>
             <h3>Proveedores</h3>
