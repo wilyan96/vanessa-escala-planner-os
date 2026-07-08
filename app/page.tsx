@@ -40,6 +40,7 @@ type ModuleId =
   | "timeline"
   | "vendors"
   | "quotes"
+  | "receipts"
   | "contracts"
   | "documents"
   | "emails";
@@ -196,6 +197,35 @@ type QuoteItem = {
   tax: number;
 };
 
+type Receipt = {
+  id: string;
+  receiptNumber: string;
+  client: string;
+  clientEmail: string;
+  clientPhone: string;
+  eventId: string;
+  eventName: string;
+  eventDate: string;
+  eventPlace: string;
+  accountNumber: string;
+  issueDate: string;
+  paymentDueDate: string;
+  paymentMethod: string;
+  serviceCharge: number;
+  itbmsRate: number;
+  deliveryFee: number;
+  notes: string;
+  items: ReceiptItem[];
+  status: string;
+};
+
+type ReceiptItem = {
+  id: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+};
+
 type Contract = {
   id: string;
   contractNumber: string;
@@ -312,6 +342,7 @@ const nav = [
   { id: "timeline", label: "Cronograma Operativo", icon: ClipboardList },
   { id: "vendors", label: "Proveedores", icon: Handshake },
   { id: "quotes", label: "Cotizaciones", icon: CircleDollarSign },
+  { id: "receipts", label: "Recibos de Pago", icon: FileSignature },
   { id: "contracts", label: "Contratos y Firmas", icon: FileSignature },
   { id: "documents", label: "Documentos", icon: FolderOpen },
   { id: "emails", label: "Correos", icon: Mail }
@@ -347,6 +378,11 @@ const moduleCopy: Record<ModuleId, { title: string; description: string }> = {
     title: "Cotizaciones",
     description:
       "Cotizaciones editables, duplicables, descargables en PDF y listas para enviar."
+  },
+  receipts: {
+    title: "Recibos de Pago",
+    description:
+      "Recibos numerados desde REC-250, conectados a eventos y listos para descargar o imprimir."
   },
   contracts: {
     title: "Contratos y Firmas",
@@ -1148,6 +1184,37 @@ const initialPayments: Payment[] = [
   }
 ];
 
+const initialReceipts: Receipt[] = [
+  {
+    id: "rc-1",
+    receiptNumber: "REC-250",
+    client: "Mariana Lopez",
+    clientEmail: "mariana@example.com",
+    clientPhone: "+507 6123-4455",
+    eventId: "ev-1",
+    eventName: "Boda Valeria & Andres",
+    eventDate: "18 jul 2026",
+    eventPlace: "Casa Veranda",
+    accountNumber: "VE-000250",
+    issueDate: "01 jul 2026",
+    paymentDueDate: "01 jul 2026",
+    paymentMethod: "ACH",
+    serviceCharge: 0,
+    itbmsRate: 0,
+    deliveryFee: 0,
+    notes: "Recibo por reserva de fecha del evento.",
+    items: [
+      {
+        id: "ri-1",
+        description: "Reserva de fecha",
+        quantity: 1,
+        unitPrice: 12000
+      }
+    ],
+    status: "Pagado"
+  }
+];
+
 const initialDocuments: DocumentItem[] = [
   {
     id: "dc-1",
@@ -1258,6 +1325,35 @@ const blankQuote: Quote = {
     }
   ],
   expires: "",
+  status: "Borrador"
+};
+
+const blankReceipt: Receipt = {
+  id: "",
+  receiptNumber: "",
+  client: "",
+  clientEmail: "",
+  clientPhone: "",
+  eventId: "",
+  eventName: "",
+  eventDate: "",
+  eventPlace: "",
+  accountNumber: "",
+  issueDate: "",
+  paymentDueDate: "",
+  paymentMethod: "ACH",
+  serviceCharge: 0,
+  itbmsRate: 0,
+  deliveryFee: 0,
+  notes: "",
+  items: [
+    {
+      id: "ri-draft-1",
+      description: "",
+      quantity: 1,
+      unitPrice: 0
+    }
+  ],
   status: "Borrador"
 };
 
@@ -1376,6 +1472,28 @@ function quoteTotals(quote: Quote) {
   const tax = quote.items.reduce((sum, item) => sum + item.tax, 0);
   const total = quote.items.reduce((sum, item) => sum + quoteItemTotal(item), 0);
   return { discount, subtotal, tax, total };
+}
+
+function nextReceiptNumber(receipts: Receipt[]) {
+  const maxSequence = receipts.reduce((max, receipt) => {
+    const match = receipt.receiptNumber.match(/REC-(\d+)/);
+    return match ? Math.max(max, Number(match[1])) : max;
+  }, RECEIPT_START_NUMBER - 1);
+  return `REC-${maxSequence + 1}`;
+}
+
+function receiptItemSubtotal(item: ReceiptItem) {
+  return item.quantity * item.unitPrice;
+}
+
+function receiptTotals(receipt: Receipt) {
+  const subtotal = receipt.items.reduce((sum, item) => sum + receiptItemSubtotal(item), 0);
+  const serviceCharge = receipt.serviceCharge;
+  const deliveryFee = receipt.deliveryFee;
+  const taxableAmount = subtotal + serviceCharge + deliveryFee;
+  const itbms = taxableAmount * (receipt.itbmsRate / 100);
+  const total = taxableAmount + itbms;
+  return { deliveryFee, itbms, serviceCharge, subtotal, total };
 }
 
 function nextContractNumber(contracts: Contract[]) {
@@ -1674,11 +1792,6 @@ function drawWrappedCanvasText(
   return currentY + lineHeight;
 }
 
-function receiptNumberForPayment(payments: Payment[], paymentId: string) {
-  const index = payments.findIndex((payment) => payment.id === paymentId);
-  return `REC-${RECEIPT_START_NUMBER + Math.max(index, 0)}`;
-}
-
 function safeFilename(value: string) {
   return value
     .toLowerCase()
@@ -1686,11 +1799,7 @@ function safeFilename(value: string) {
     .replace(/(^-|-$)/g, "");
 }
 
-async function createPaymentReceiptPdf(
-  eventRecord: EventRecord,
-  payment: Payment,
-  receiptNumber: string
-) {
+async function createReceiptPdf(receipt: Receipt) {
   const canvas = document.createElement("canvas");
   canvas.width = 1275;
   canvas.height = 1650;
@@ -1699,175 +1808,166 @@ async function createPaymentReceiptPdf(
   if (!context) return null;
 
   const logo = await loadReceiptLogo();
-  const paidAmount = payment.paid;
-  const pendingAmount = Math.max(payment.amount - payment.paid, 0);
-  const issuedAt = new Intl.DateTimeFormat("es-PA", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric"
-  }).format(new Date());
+  const totals = receiptTotals(receipt);
 
   context.fillStyle = "#ffffff";
   context.fillRect(0, 0, canvas.width, canvas.height);
-  context.fillStyle = "#111827";
-  context.fillRect(0, 0, canvas.width, 26);
-  context.fillStyle = "#c8a95b";
-  context.fillRect(0, 26, canvas.width, 8);
+  context.strokeStyle = "#ebe7df";
+  context.lineWidth = 4;
+  context.strokeRect(68, 50, 1139, 1550);
 
-  if (logo) {
-    context.drawImage(logo, 96, 78, 138, 138);
-  } else {
-    context.fillStyle = "#111827";
-    context.fillRect(96, 78, 138, 138);
-    context.fillStyle = "#c8a95b";
-    context.font = "bold 42px Arial";
-    context.fillText("VE", 132, 162);
-  }
-
-  context.fillStyle = "#111827";
-  context.font = "bold 42px Arial";
-  context.fillText("Vanessa Escala Planner OS", 260, 118);
-  context.font = "24px Arial";
-  context.fillStyle = "#4b5563";
-  context.fillText("Wedding & Events Planner", 260, 158);
-  context.fillText("vanessaescalaplanner@gmail.com", 260, 194);
+  context.fillStyle = "#203943";
+  context.font = "56px Arial";
+  context.fillText("Recibo de", 116, 138);
+  context.font = "bold 56px Arial";
+  context.fillText("Pago", 398, 138);
+  context.font = "28px Arial";
+  context.fillStyle = "#203943";
+  context.fillText(`No. ${receipt.receiptNumber || "REC-250"}`, 116, 184);
 
   context.textAlign = "right";
-  context.fillStyle = "#111827";
-  context.font = "bold 54px Arial";
-  context.fillText("RECIBO DE PAGO", 1178, 122);
-  context.fillStyle = "#c8a95b";
-  context.font = "bold 36px Arial";
-  context.fillText(receiptNumber, 1178, 174);
-  context.fillStyle = "#4b5563";
-  context.font = "24px Arial";
-  context.fillText(`Emision: ${issuedAt}`, 1178, 212);
+  if (logo) {
+    context.drawImage(logo, 976, 80, 136, 136);
+  } else {
+    context.fillStyle = "#203943";
+    context.fillRect(976, 80, 136, 136);
+    context.fillStyle = "#c7a12a";
+    context.font = "bold 40px Arial";
+    context.fillText("VE", 1070, 160);
+  }
+  context.fillStyle = "#203943";
+  context.font = "bold 26px Arial";
+  context.fillText("Vanessa Escala", 1130, 250);
+  context.fillStyle = "#c7a12a";
+  context.font = "bold 34px Arial";
+  context.fillText("Planner OS", 1130, 288);
   context.textAlign = "left";
 
-  context.strokeStyle = "#d1d5db";
-  context.lineWidth = 2;
-  context.strokeRect(96, 280, 1082, 252);
-
-  context.fillStyle = "#f9fafb";
-  context.fillRect(96, 280, 1082, 58);
-  context.fillStyle = "#111827";
+  context.fillStyle = "#0f172a";
   context.font = "bold 28px Arial";
-  context.fillText("Datos del cliente y evento", 126, 319);
+  context.fillText("Recibo a:", 116, 320);
+  context.font = "bold 31px Arial";
+  context.fillText(receipt.client || "Cliente", 116, 384);
+  context.font = "27px Arial";
+  context.fillStyle = "#374151";
+  const clientLine = [receipt.clientEmail, receipt.clientPhone].filter(Boolean).join(" / ");
+  drawWrappedCanvasText(context, clientLine || "-", 116, 436, 430, 34);
 
-  const details = [
-    ["Recibido de", eventRecord.clientName],
-    ["Correo", eventRecord.clientEmail || "-"],
-    ["Evento", eventRecord.name],
-    ["Numero de evento", eventRecord.eventNumber],
-    ["Lugar", eventRecord.venue || "-"],
-    ["Fecha del evento", eventRecord.date]
-  ];
+  context.fillStyle = "#203943";
+  context.font = "bold 26px Arial";
+  context.fillText("No. Cuenta", 690, 385);
+  context.fillText("Fecha", 690, 430);
+  context.fillText("Evento", 690, 475);
+  context.fillText("Lugar", 690, 520);
+  context.fillText("Metodo", 690, 565);
+  context.font = "27px Arial";
+  context.fillText(":", 865, 385);
+  context.fillText(":", 865, 430);
+  context.fillText(":", 865, 475);
+  context.fillText(":", 865, 520);
+  context.fillText(":", 865, 565);
+  context.fillStyle = "#374151";
+  drawWrappedCanvasText(context, receipt.accountNumber || receipt.receiptNumber || "-", 910, 385, 260, 30);
+  drawWrappedCanvasText(context, receipt.issueDate || "-", 910, 430, 260, 30);
+  drawWrappedCanvasText(context, receipt.eventName || "-", 910, 475, 260, 30);
+  drawWrappedCanvasText(context, receipt.eventPlace || "-", 910, 520, 260, 30);
+  drawWrappedCanvasText(context, receipt.paymentMethod || "-", 910, 565, 260, 30);
 
-  details.forEach(([label, value], index) => {
-    const column = index % 2;
-    const row = Math.floor(index / 2);
-    const x = 126 + column * 520;
-    const y = 382 + row * 56;
-    context.fillStyle = "#6b7280";
-    context.font = "bold 18px Arial";
-    context.fillText(label.toUpperCase(), x, y);
-    context.fillStyle = "#111827";
-    context.font = "24px Arial";
-    drawWrappedCanvasText(context, value, x, y + 30, 440, 28);
-  });
-
-  context.fillStyle = "#111827";
-  context.font = "bold 34px Arial";
-  context.fillText("Detalle del pago", 96, 622);
-
-  const tableX = 96;
-  const tableY = 670;
-  const tableWidth = 1082;
-  const rowHeight = 74;
-  const columns = [360, 190, 190, 190, 152];
-  const headers = ["Concepto", "Monto", "Recibido", "Saldo", "Estado"];
-  const values = [
-    payment.concept,
-    money(payment.amount),
-    money(paidAmount),
-    money(pendingAmount),
-    payment.status
-  ];
+  const tableX = 116;
+  const tableY = 675;
+  const tableWidth = 1044;
+  const rowHeight = 58;
+  const columns = [430, 185, 240, 189];
+  const headers = ["Servicio", "Cantidad", "Precio unitario", "Subtotal"];
   let currentX = tableX;
 
-  context.fillStyle = "#111827";
+  context.fillStyle = "#b89422";
   context.fillRect(tableX, tableY, tableWidth, rowHeight);
-  context.fillStyle = "#ffffff";
-  context.font = "bold 20px Arial";
+  context.strokeStyle = "#d4d0c6";
+  context.lineWidth = 3;
+  context.strokeRect(tableX, tableY, tableWidth, rowHeight);
+  context.fillStyle = "#111827";
+  context.font = "bold 25px Arial";
   headers.forEach((header, index) => {
-    context.fillText(header, currentX + 18, tableY + 45);
+    context.fillText(header, currentX + 20, tableY + 38);
     currentX += columns[index];
   });
 
-  context.strokeStyle = "#d1d5db";
-  context.strokeRect(tableX, tableY + rowHeight, tableWidth, rowHeight);
-  currentX = tableX;
   context.fillStyle = "#111827";
-  context.font = "22px Arial";
-  values.forEach((value, index) => {
-    drawWrappedCanvasText(context, value, currentX + 18, tableY + rowHeight + 45, columns[index] - 30, 26);
-    currentX += columns[index];
+  context.font = "25px Arial";
+  receipt.items.slice(0, 5).forEach((item, rowIndex) => {
+    const y = tableY + rowHeight * (rowIndex + 1);
+    currentX = tableX;
+    context.strokeStyle = "#d4d0c6";
+    context.strokeRect(tableX, y, tableWidth, rowHeight);
+    [
+      item.description || "Servicio",
+      String(item.quantity),
+      money(item.unitPrice),
+      money(receiptItemSubtotal(item))
+    ].forEach((value, index) => {
+      context.fillStyle = "#374151";
+      drawWrappedCanvasText(context, value, currentX + 20, y + 38, columns[index] - 30, 28);
+      currentX += columns[index];
+    });
   });
 
-  context.fillStyle = "#f7f3e8";
-  context.fillRect(96, 900, 1082, 180);
+  const subtotalY = tableY + rowHeight * 6;
+  context.strokeStyle = "#d4d0c6";
+  context.strokeRect(tableX, subtotalY, tableWidth, rowHeight);
   context.fillStyle = "#111827";
-  context.font = "bold 30px Arial";
-  context.fillText("Monto recibido", 132, 956);
-  context.fillStyle = "#9a7a21";
-  context.font = "bold 68px Arial";
-  context.fillText(money(paidAmount), 132, 1042);
-  context.fillStyle = "#374151";
-  context.font = "24px Arial";
-  context.fillText(`Metodo de pago: ${eventRecord.paymentMethod || "-"}`, 710, 962);
-  context.fillText(`Fecha de referencia: ${payment.dueDate || "-"}`, 710, 1004);
-  context.fillText(`Estado financiero del evento: ${eventRecord.paymentStatus || "-"}`, 710, 1046);
+  context.font = "bold 27px Arial";
+  context.fillText("Subtotal", tableX + 162, subtotalY + 38);
+  context.fillText(money(totals.subtotal), tableX + 835, subtotalY + 38);
 
   context.fillStyle = "#111827";
   context.font = "bold 28px Arial";
-  context.fillText("Nota", 96, 1178);
+  context.fillText("Cargos adicionales:", 116, 1110);
+  context.font = "26px Arial";
+  context.fillStyle = "#374151";
+  context.fillText("Cargo de servicio", 132, 1170);
+  context.fillText(`: ${money(totals.serviceCharge)}`, 400, 1170);
+  context.fillText(`ITBMS (${receipt.itbmsRate || 0}%)`, 132, 1216);
+  context.fillText(`: ${money(totals.itbms)}`, 400, 1216);
+  context.fillText("Cargo de entrega", 132, 1262);
+  context.fillText(`: ${money(totals.deliveryFee)}`, 400, 1262);
+
+  context.fillStyle = "#111827";
+  context.font = "bold 30px Arial";
+  context.fillText("Total recibido", 132, 1350);
+  context.fillText(`: ${money(totals.total)}`, 400, 1350);
+
+  context.font = "bold 38px Arial";
+  context.fillStyle = "#b89422";
+  context.textAlign = "right";
+  context.fillText("Vanessa Escala", 1130, 1328);
+  context.fillStyle = "#203943";
+  context.font = "38px Arial";
+  context.fillText("Wedding & Events Planner", 1130, 1376);
   context.fillStyle = "#374151";
   context.font = "24px Arial";
-  drawWrappedCanvasText(
-    context,
-    "Este recibo confirma el pago registrado en Vanessa Escala Planner OS. Conserva este documento como comprobante administrativo del evento indicado.",
-    96,
-    1222,
-    1082,
-    34
-  );
+  context.fillText("Panama", 1130, 1448);
+  context.fillText("+507 6000-0000", 1130, 1500);
+  context.fillText("vanessaescalaplanner@gmail.com", 1130, 1552);
+  context.textAlign = "left";
 
-  context.strokeStyle = "#111827";
-  context.lineWidth = 2;
-  context.beginPath();
-  context.moveTo(760, 1428);
-  context.lineTo(1178, 1428);
-  context.stroke();
   context.fillStyle = "#111827";
+  context.font = "bold 25px Arial";
+  context.fillText("Fecha limite de pago:", 132, 1460);
+  context.font = "bold 27px Arial";
+  context.fillText(receipt.paymentDueDate || receipt.issueDate || "-", 132, 1498);
   context.font = "22px Arial";
-  context.fillText("Vanessa Escala Wedding & Events Planner", 760, 1466);
-
-  context.fillStyle = "#6b7280";
-  context.font = "18px Arial";
-  context.fillText("Documento generado automaticamente por Vanessa Escala Planner OS.", 96, 1538);
+  context.fillStyle = "#4b5563";
+  drawWrappedCanvasText(context, receipt.notes || "Recibo generado por pago registrado.", 132, 1540, 520, 28);
 
   const jpegBytes = dataUrlToBytes(canvas.toDataURL("image/jpeg", 0.94));
   return createJpegPagePdf(jpegBytes);
 }
 
-async function downloadPaymentReceiptPdf(
-  eventRecord: EventRecord,
-  payment: Payment,
-  receiptNumber: string
-) {
-  const receipt = await createPaymentReceiptPdf(eventRecord, payment, receiptNumber);
-  if (!receipt) return;
-  downloadBlob(receipt, `${safeFilename(receiptNumber)}-${safeFilename(eventRecord.clientName)}.pdf`);
+async function downloadReceiptPdf(receipt: Receipt) {
+  const pdf = await createReceiptPdf(receipt);
+  if (!pdf) return;
+  downloadBlob(pdf, `${safeFilename(receipt.receiptNumber || "recibo")}-${safeFilename(receipt.client || "cliente")}.pdf`);
 }
 
 function money(value: number) {
@@ -2500,6 +2600,7 @@ export default function Home() {
   const [timeline, setTimeline] = useState<TimelineItem[]>(initialTimeline);
   const [vendors, setVendors] = useState<Vendor[]>(initialVendors);
   const [quotes, setQuotes] = useState<Quote[]>(initialQuotes);
+  const [receipts, setReceipts] = useState<Receipt[]>(initialReceipts);
   const [contracts, setContracts] = useState<Contract[]>(initialContracts);
   const [documents, setDocuments] = useState<DocumentItem[]>(initialDocuments);
   const [templates, setTemplates] = useState<EmailTemplate[]>(initialTemplates);
@@ -2915,6 +3016,46 @@ export default function Home() {
               );
             }}
             quotes={quotes}
+          />
+        )}
+
+        {activeModule === "receipts" && (
+          <ReceiptsView
+            events={events}
+            onDelete={(id) =>
+              setReceipts((current) => current.filter((item) => item.id !== id))
+            }
+            onDuplicate={(receipt) =>
+              setReceipts((current) => [
+                ...current,
+                {
+                  ...receipt,
+                  id: makeId("rc"),
+                  receiptNumber: nextReceiptNumber(current),
+                  status: "Borrador",
+                  items: receipt.items.map((item) => ({
+                    ...item,
+                    id: makeId("ri")
+                  }))
+                }
+              ])
+            }
+            onSave={(receipt) => {
+              setReceipts((current) =>
+                receipt.id
+                  ? current.map((item) => (item.id === receipt.id ? receipt : item))
+                  : [
+                      ...current,
+                      {
+                        ...receipt,
+                        accountNumber: receipt.accountNumber || `VE-${nextReceiptNumber(current).replace("REC-", "").padStart(6, "0")}`,
+                        id: makeId("rc"),
+                        receiptNumber: nextReceiptNumber(current)
+                      }
+                    ]
+              );
+            }}
+            receipts={receipts}
           />
         )}
 
@@ -3529,7 +3670,7 @@ function EventsView({
           <Panel title={draft.id ? "Editar evento" : "Nuevo evento"}>
             <EventForm draft={draft} onCancel={() => setDraft(blankEvent)} onChange={setDraft} onSubmit={submit} />
           </Panel>
-          {selectedEvent && <EventDigitalFolder allPayments={payments} eventRecord={selectedEvent} eventContracts={eventContracts} eventPayments={eventPayments} eventTimeline={eventTimeline} onOpenModule={onOpenModule} selectedAlerts={selectedAlerts} />}
+          {selectedEvent && <EventDigitalFolder eventRecord={selectedEvent} eventContracts={eventContracts} eventPayments={eventPayments} eventTimeline={eventTimeline} onOpenModule={onOpenModule} selectedAlerts={selectedAlerts} />}
         </div>
       </section>
     </section>
@@ -3537,7 +3678,6 @@ function EventsView({
 }
 
 function EventDigitalFolder({
-  allPayments,
   eventContracts,
   eventPayments,
   eventRecord,
@@ -3545,7 +3685,6 @@ function EventDigitalFolder({
   onOpenModule,
   selectedAlerts
 }: Readonly<{
-  allPayments: Payment[];
   eventContracts: Contract[];
   eventPayments: Payment[];
   eventRecord: EventRecord;
@@ -3608,30 +3747,7 @@ function EventDigitalFolder({
             <Detail label="Pagos pendientes proveedores" value={money(providerPending)} />
             <Detail label="Ganancia estimada" value={money(estimatedProfit)} />
             <Detail label="Estado financiero" value={eventRecord.paymentStatus} />
-            <DataTable
-              headers={["Recibo", "Concepto", "Monto", "Pagado", "Saldo", "Estado", "PDF"]}
-              rows={eventPayments.map((payment) => {
-                const receiptNumber = receiptNumberForPayment(allPayments, payment.id);
-                return [
-                  receiptNumber,
-                  payment.concept,
-                  money(payment.amount),
-                  money(payment.paid),
-                  money(Math.max(payment.amount - payment.paid, 0)),
-                  payment.status,
-                  <button
-                    className="icon-button"
-                    disabled={payment.paid <= 0}
-                    key="receipt"
-                    onClick={() => void downloadPaymentReceiptPdf(eventRecord, payment, receiptNumber)}
-                    title={payment.paid > 0 ? "Descargar recibo de pago" : "Registra un pago para generar recibo"}
-                    type="button"
-                  >
-                    <Download size={15} aria-hidden="true" />
-                  </button>
-                ];
-              })}
-            />
+            <DataTable headers={["Concepto", "Monto", "Pagado", "Estado"]} rows={eventPayments.map((payment) => [payment.concept, money(payment.amount), money(payment.paid), payment.status])} />
           </section>
           <section>
             <h3>Proveedores</h3>
@@ -4251,6 +4367,249 @@ function QuotePreview({ quote }: Readonly<{ quote: Quote }>) {
           <li>Precios sujetos a cambios.</li>
           <li>Gracias por confiar en nosotros.</li>
         </ul>
+      </article>
+    </div>
+  );
+}
+
+function ReceiptsView({
+  events,
+  onDelete,
+  onDuplicate,
+  onSave,
+  receipts
+}: Readonly<{
+  events: EventRecord[];
+  onDelete: (id: string) => void;
+  onDuplicate: (receipt: Receipt) => void;
+  onSave: (receipt: Receipt) => void;
+  receipts: Receipt[];
+}>) {
+  const [draft, setDraft] = useState<Receipt>(blankReceipt);
+  const [pendingPrintReceiptId, setPendingPrintReceiptId] = useState<string | null>(null);
+  const previewReceipt = draft.id || draft.client ? draft : receipts[0];
+
+  useEffect(() => {
+    if (!pendingPrintReceiptId || previewReceipt?.id !== pendingPrintReceiptId) return;
+
+    const timer = window.setTimeout(() => {
+      printElement("receipt-paper-preview", `Recibo-${previewReceipt.receiptNumber}`);
+      setPendingPrintReceiptId(null);
+    }, 120);
+
+    return () => window.clearTimeout(timer);
+  }, [pendingPrintReceiptId, previewReceipt]);
+
+  function printReceipt(receipt: Receipt) {
+    setDraft(receipt);
+    setPendingPrintReceiptId(receipt.id);
+  }
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!draft.client.trim()) return;
+    onSave(draft);
+    setDraft(blankReceipt);
+  }
+
+  return (
+    <section className="module-grid quotes-layout">
+      <Panel title="Recibos de pago">
+        <DataTable
+          headers={["No.", "Cliente", "Evento", "Total", "Fecha", "Estado", "Acciones"]}
+          rows={receipts.map((receipt) => [
+            receipt.receiptNumber,
+            receipt.client,
+            receipt.eventName,
+            money(receiptTotals(receipt).total),
+            receipt.issueDate,
+            <ReceiptStatusSelect
+              key="status"
+              onChange={(status) => onSave({ ...receipt, status })}
+              value={receipt.status}
+            />,
+            <ReceiptTableActions
+              key="actions"
+              onDelete={() => onDelete(receipt.id)}
+              onDuplicate={() => onDuplicate(receipt)}
+              onEdit={() => setDraft(receipt)}
+              onPrint={() => printReceipt(receipt)}
+              receipt={receipt}
+            />
+          ])}
+        />
+      </Panel>
+
+      <Panel title={draft.id ? "Editar recibo" : "Nuevo recibo"}>
+        <ReceiptForm draft={draft} events={events} onCancel={() => setDraft(blankReceipt)} onChange={setDraft} onSubmit={submit} receipts={receipts} />
+      </Panel>
+
+      {previewReceipt && <ReceiptPreview receipt={previewReceipt} />}
+    </section>
+  );
+}
+
+function ReceiptStatusSelect({
+  onChange,
+  value
+}: Readonly<{
+  onChange: (value: string) => void;
+  value: string;
+}>) {
+  return (
+    <select
+      className={`input status-select ${statusToneFromLabel(value)}`}
+      onChange={(event) => onChange(event.target.value)}
+      value={value}
+    >
+      {["Borrador", "Emitido", "Enviado", "Pagado", "Anulado"].map((status) => (
+        <option key={status}>{status}</option>
+      ))}
+    </select>
+  );
+}
+
+function ReceiptTableActions({
+  onDelete,
+  onDuplicate,
+  onEdit,
+  onPrint,
+  receipt
+}: Readonly<{
+  onDelete: () => void;
+  onDuplicate: () => void;
+  onEdit: () => void;
+  onPrint: () => void;
+  receipt: Receipt;
+}>) {
+  return (
+    <div className="quote-table-actions">
+      <button className="button compact-action" onClick={onEdit} type="button">
+        <Edit3 size={15} aria-hidden="true" />
+        Editar
+      </button>
+      <button className="button compact-action" onClick={() => void downloadReceiptPdf(receipt)} type="button">
+        <Download size={15} aria-hidden="true" />
+        PDF
+      </button>
+      <details className="action-menu">
+        <summary className="button compact-action secondary">
+          <MoreHorizontal size={15} aria-hidden="true" />
+          Mas
+        </summary>
+        <div className="action-menu-panel">
+          <button className="menu-action" onClick={onPrint} type="button">
+            <Download size={15} aria-hidden="true" />
+            Imprimir
+          </button>
+          <button className="menu-action" onClick={onDuplicate} type="button">
+            <Copy size={15} aria-hidden="true" />
+            Duplicar
+          </button>
+          <button className="menu-action danger" onClick={onDelete} type="button">
+            <Trash2 size={15} aria-hidden="true" />
+            Eliminar
+          </button>
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function ReceiptPreview({ receipt }: Readonly<{ receipt: Receipt }>) {
+  const totals = receiptTotals(receipt);
+  const receiptNumber = receipt.receiptNumber || "Se asigna al guardar";
+
+  return (
+    <div className="receipt-preview-wrap">
+      <div className="quote-actions no-print">
+        <button className="button" onClick={() => void downloadReceiptPdf(receipt)} type="button">
+          <Download size={17} aria-hidden="true" />
+          Descargar PDF
+        </button>
+        <button className="button" onClick={() => printElement("receipt-paper-preview", "Recibo")} type="button">
+          <Download size={17} aria-hidden="true" />
+          Imprimir
+        </button>
+      </div>
+
+      <article className="receipt-paper" id="receipt-paper-preview">
+        <header className="receipt-header">
+          <div>
+            <h2><span>Recibo de</span> Pago</h2>
+            <p>No. {receiptNumber}</p>
+          </div>
+          <div className="receipt-brand">
+            <img alt="Vanessa Escala" src={publicAssetPath("/logo-vanessa.png")} />
+            <strong>Vanessa Escala</strong>
+            <span>Planner OS</span>
+          </div>
+        </header>
+
+        <section className="receipt-client-grid">
+          <div>
+            <strong>Recibo a:</strong>
+            <h3>{receipt.client || "Cliente"}</h3>
+            <p>{receipt.clientEmail || "-"}</p>
+            <p>{receipt.clientPhone || "-"}</p>
+          </div>
+          <dl>
+            <div><dt>No. Cuenta</dt><dd>{receipt.accountNumber || receipt.receiptNumber || "-"}</dd></div>
+            <div><dt>Fecha</dt><dd>{receipt.issueDate || "-"}</dd></div>
+            <div><dt>Evento</dt><dd>{receipt.eventName || "-"}</dd></div>
+            <div><dt>Lugar</dt><dd>{receipt.eventPlace || "-"}</dd></div>
+            <div><dt>Metodo</dt><dd>{receipt.paymentMethod || "-"}</dd></div>
+          </dl>
+        </section>
+
+        <table className="receipt-items">
+          <thead>
+            <tr>
+              <th>Servicio</th>
+              <th>Cantidad</th>
+              <th>Precio unitario</th>
+              <th>Subtotal</th>
+            </tr>
+          </thead>
+          <tbody>
+            {receipt.items.map((item) => (
+              <tr key={item.id}>
+                <td>{item.description || "Servicio"}</td>
+                <td>{item.quantity}</td>
+                <td>{money(item.unitPrice)}</td>
+                <td>{money(receiptItemSubtotal(item))}</td>
+              </tr>
+            ))}
+            {Array.from({ length: Math.max(0, 5 - receipt.items.length) }).map((_, index) => (
+              <tr key={index}><td>&nbsp;</td><td></td><td></td><td></td></tr>
+            ))}
+            <tr>
+              <th>Subtotal</th>
+              <td></td>
+              <td></td>
+              <th>{money(totals.subtotal)}</th>
+            </tr>
+          </tbody>
+        </table>
+
+        <section className="receipt-bottom">
+          <div>
+            <h3>Cargos adicionales:</h3>
+            <p><span>Cargo de servicio</span><strong>{money(totals.serviceCharge)}</strong></p>
+            <p><span>ITBMS ({receipt.itbmsRate || 0}%)</span><strong>{money(totals.itbms)}</strong></p>
+            <p><span>Cargo de entrega</span><strong>{money(totals.deliveryFee)}</strong></p>
+            <h3 className="receipt-total">Total recibido <strong>{money(totals.total)}</strong></h3>
+            <p className="receipt-note"><strong>Fecha limite de pago:</strong> {receipt.paymentDueDate || receipt.issueDate || "-"}</p>
+            <p className="receipt-note">{receipt.notes || "Recibo generado por pago registrado."}</p>
+          </div>
+          <div className="receipt-footer-brand">
+            <h3>Vanessa Escala</h3>
+            <p>Wedding & Events Planner</p>
+            <span>Panama</span>
+            <span>+507 6000-0000</span>
+            <span>vanessaescalaplanner@gmail.com</span>
+          </div>
+        </section>
       </article>
     </div>
   );
@@ -4945,6 +5304,166 @@ function VendorForm({ draft, onCancel, onChange, onSubmit }: FormProps<Vendor>) 
       <Input label="Correo" value={draft.email} onChange={(email) => onChange({ ...draft, email })} />
       <Input label="Tarifa" value={draft.rate} onChange={(rate) => onChange({ ...draft, rate })} />
       <Input label="Estado" value={draft.status} onChange={(status) => onChange({ ...draft, status })} />
+      <FormActions isEditing={Boolean(draft.id)} onCancel={onCancel} />
+    </form>
+  );
+}
+
+function ReceiptForm({
+  draft,
+  events,
+  onCancel,
+  onChange,
+  onSubmit,
+  receipts
+}: Readonly<{
+  draft: Receipt;
+  events: EventRecord[];
+  onCancel: () => void;
+  onChange: (value: Receipt) => void;
+  onSubmit: (event: FormEvent) => void;
+  receipts: Receipt[];
+}>) {
+  function updateItem(id: string, patch: Partial<ReceiptItem>) {
+    onChange({
+      ...draft,
+      items: draft.items.map((item) =>
+        item.id === id ? { ...item, ...patch } : item
+      )
+    });
+  }
+
+  function addItem() {
+    onChange({
+      ...draft,
+      items: [...draft.items, { id: makeId("ri"), description: "", quantity: 1, unitPrice: 0 }]
+    });
+  }
+
+  function removeItem(id: string) {
+    onChange({
+      ...draft,
+      items: draft.items.length > 1 ? draft.items.filter((item) => item.id !== id) : draft.items
+    });
+  }
+
+  function selectEvent(eventId: string) {
+    const eventRecord = events.find((eventItem) => eventItem.id === eventId);
+    if (!eventRecord) {
+      onChange({ ...draft, eventId });
+      return;
+    }
+
+    onChange({
+      ...draft,
+      accountNumber: draft.accountNumber || `VE-${(draft.receiptNumber || nextReceiptNumber(receipts)).replace("REC-", "").padStart(6, "0")}`,
+      client: eventRecord.clientName,
+      clientEmail: eventRecord.clientEmail,
+      clientPhone: eventRecord.clientPhone,
+      eventDate: eventRecord.date,
+      eventId,
+      eventName: eventRecord.name,
+      eventPlace: eventRecord.venue,
+      items:
+        draft.items.length === 1 && !draft.items[0].description
+          ? [
+              {
+                id: draft.items[0].id,
+                description: "Pago de evento",
+                quantity: 1,
+                unitPrice: currencyToNumber(eventRecord.paid || eventRecord.deposit || eventRecord.contractedAmount)
+              }
+            ]
+          : draft.items,
+      paymentDueDate: draft.paymentDueDate || eventRecord.paymentDeadline,
+      paymentMethod: draft.paymentMethod || eventRecord.paymentMethod
+    });
+  }
+
+  return (
+    <form className="form-grid contract-form" onSubmit={onSubmit}>
+      <div className="form-section full">
+        <h3>Datos del recibo</h3>
+        <div className="form-grid">
+          <label className="field">
+            <span>No. recibo automatico</span>
+            <input className="input" disabled value={draft.receiptNumber || nextReceiptNumber(receipts)} />
+          </label>
+          <label className="field">
+            <span>Evento relacionado</span>
+            <select className="input" onChange={(event) => selectEvent(event.target.value)} value={draft.eventId}>
+              <option value="">Seleccionar evento</option>
+              {events.map((eventRecord) => (
+                <option key={eventRecord.id} value={eventRecord.id}>{eventRecord.name}</option>
+              ))}
+            </select>
+          </label>
+          <Input label="No. cuenta / referencia" value={draft.accountNumber} onChange={(accountNumber) => onChange({ ...draft, accountNumber })} />
+          <Input label="Fecha de emision" value={draft.issueDate} onChange={(issueDate) => onChange({ ...draft, issueDate })} />
+          <Input label="Fecha limite de pago" value={draft.paymentDueDate} onChange={(paymentDueDate) => onChange({ ...draft, paymentDueDate })} />
+          <label className="field">
+            <span>Estado</span>
+            <select className="input" onChange={(event) => onChange({ ...draft, status: event.target.value })} value={draft.status}>
+              {["Borrador", "Emitido", "Enviado", "Pagado", "Anulado"].map((status) => <option key={status}>{status}</option>)}
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <div className="form-section full">
+        <h3>Cliente y evento</h3>
+        <div className="form-grid">
+          <Input label="Cliente" value={draft.client} onChange={(client) => onChange({ ...draft, client })} />
+          <Input label="Correo" value={draft.clientEmail} onChange={(clientEmail) => onChange({ ...draft, clientEmail })} />
+          <Input label="Telefono" value={draft.clientPhone} onChange={(clientPhone) => onChange({ ...draft, clientPhone })} />
+          <Input label="Nombre del evento" value={draft.eventName} onChange={(eventName) => onChange({ ...draft, eventName })} />
+          <Input label="Fecha del evento" value={draft.eventDate} onChange={(eventDate) => onChange({ ...draft, eventDate })} />
+          <Input label="Lugar del evento" value={draft.eventPlace} onChange={(eventPlace) => onChange({ ...draft, eventPlace })} />
+          <Input label="Metodo de pago" value={draft.paymentMethod} onChange={(paymentMethod) => onChange({ ...draft, paymentMethod })} />
+        </div>
+      </div>
+
+      <div className="form-section full">
+        <h3>Servicios pagados</h3>
+        <div className="quote-item-editor full">
+          <div className="quote-item-editor-header">
+            <strong>Items del recibo</strong>
+            <button className="button" onClick={addItem} type="button"><Plus size={16} aria-hidden="true" />Agregar fila</button>
+          </div>
+          <div className="receipt-item-editor">
+            <div className="receipt-item-row receipt-item-head">
+              <span>Servicio</span>
+              <span>Cantidad</span>
+              <span>Precio unitario</span>
+              <span>Subtotal</span>
+              <span />
+            </div>
+            {draft.items.map((item) => (
+              <div className="receipt-item-row" key={item.id}>
+                <input className="input" onChange={(event) => updateItem(item.id, { description: event.target.value })} value={item.description} />
+                <input className="input" min="0" onChange={(event) => updateItem(item.id, { quantity: Number(event.target.value) })} type="number" value={item.quantity} />
+                <input className="input" min="0" onChange={(event) => updateItem(item.id, { unitPrice: Number(event.target.value) })} type="number" value={item.unitPrice} />
+                <strong>{money(receiptItemSubtotal(item))}</strong>
+                <button className="icon-button danger" onClick={() => removeItem(item.id)} title="Eliminar fila" type="button"><Trash2 size={16} aria-hidden="true" /></button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="form-section full">
+        <h3>Cargos y notas</h3>
+        <div className="form-grid">
+          <Input label="Cargo de servicio" type="number" value={String(draft.serviceCharge)} onChange={(serviceCharge) => onChange({ ...draft, serviceCharge: Number(serviceCharge) })} />
+          <Input label="ITBMS %" type="number" value={String(draft.itbmsRate)} onChange={(itbmsRate) => onChange({ ...draft, itbmsRate: Number(itbmsRate) })} />
+          <Input label="Cargo de entrega" type="number" value={String(draft.deliveryFee)} onChange={(deliveryFee) => onChange({ ...draft, deliveryFee: Number(deliveryFee) })} />
+        </div>
+        <Textarea label="Notas del recibo" value={draft.notes} onChange={(notes) => onChange({ ...draft, notes })} />
+        <div className="quote-editor-total">
+          Total recibo: <strong>{money(receiptTotals(draft).total)}</strong>
+        </div>
+      </div>
+
       <FormActions isEditing={Boolean(draft.id)} onCancel={onCancel} />
     </form>
   );

@@ -1319,6 +1319,27 @@ h3 {
   min-height: 34px;
 }
 
+.receipt-item-editor {
+  display: grid;
+  gap: 8px;
+  overflow-x: auto;
+}
+
+.receipt-item-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(260px, 1.6fr) 90px 130px 120px 36px;
+  min-width: 680px;
+}
+
+.receipt-item-head {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
 .quote-editor-total {
   border-top: 1px solid var(--line);
   padding-top: 10px;
@@ -1824,6 +1845,230 @@ h3 {
   margin-top: 7px;
 }
 
+.receipt-preview-wrap {
+  border-top: 1px solid var(--line);
+  grid-column: 1 / -1;
+  margin-top: 14px;
+  overflow-x: auto;
+  padding-top: 14px;
+}
+
+.receipt-paper {
+  background: #fff;
+  border: 1px solid #ebe7df;
+  color: #182f38;
+  font-family: Arial, sans-serif;
+  height: 11in;
+  line-height: 1.18;
+  margin-inline: auto;
+  overflow: hidden;
+  padding: 0.42in 0.48in;
+  width: 8.5in;
+}
+
+.receipt-paper h2,
+.receipt-paper h3,
+.receipt-paper p,
+.receipt-paper dl {
+  margin: 0;
+}
+
+.receipt-header {
+  align-items: flex-start;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.5in;
+}
+
+.receipt-header h2 {
+  font-size: 42px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.receipt-header h2 span {
+  font-weight: 400;
+}
+
+.receipt-header p {
+  font-size: 18px;
+  margin-top: 6px;
+}
+
+.receipt-brand {
+  align-items: flex-end;
+  display: grid;
+  justify-items: end;
+}
+
+.receipt-brand img {
+  height: 0.82in;
+  object-fit: contain;
+  width: 0.82in;
+}
+
+.receipt-brand strong {
+  font-size: 19px;
+  margin-top: 8px;
+}
+
+.receipt-brand span,
+.receipt-footer-brand h3 {
+  color: #b89422;
+}
+
+.receipt-brand span {
+  font-size: 25px;
+  font-weight: 800;
+}
+
+.receipt-client-grid {
+  display: grid;
+  gap: 0.38in;
+  grid-template-columns: 1fr 1.1fr;
+  margin-bottom: 0.5in;
+}
+
+.receipt-client-grid strong,
+.receipt-client-grid dt {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.receipt-client-grid h3 {
+  font-size: 22px;
+  margin: 0.25in 0 0.18in;
+}
+
+.receipt-client-grid p,
+.receipt-client-grid dd {
+  color: #384952;
+  font-size: 18px;
+}
+
+.receipt-client-grid dl {
+  display: grid;
+  gap: 8px;
+}
+
+.receipt-client-grid dl div {
+  display: grid;
+  grid-template-columns: 132px 12px 1fr;
+}
+
+.receipt-client-grid dt::after {
+  content: ":";
+  margin-left: 12px;
+}
+
+.receipt-client-grid dd {
+  grid-column: 3;
+}
+
+.receipt-items {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.receipt-items th,
+.receipt-items td {
+  border: 2px solid #d8d3c8;
+  font-size: 17px;
+  height: 0.38in;
+  padding: 8px 12px;
+  vertical-align: middle;
+}
+
+.receipt-items thead th {
+  background: #b89422;
+  color: #111;
+  font-weight: 800;
+  text-align: center;
+}
+
+.receipt-items td:nth-child(1) {
+  text-align: left;
+}
+
+.receipt-items th:nth-child(1),
+.receipt-items td:nth-child(1) {
+  width: 42%;
+}
+
+.receipt-items th:nth-child(2),
+.receipt-items td:nth-child(2) {
+  width: 16%;
+}
+
+.receipt-items th:nth-child(3),
+.receipt-items td:nth-child(3) {
+  width: 22%;
+}
+
+.receipt-items th:nth-child(4),
+.receipt-items td:nth-child(4) {
+  width: 20%;
+}
+
+.receipt-bottom {
+  display: grid;
+  gap: 0.32in;
+  grid-template-columns: 1fr 1fr;
+  margin-top: 0.18in;
+}
+
+.receipt-bottom h3 {
+  font-size: 19px;
+  margin-bottom: 0.14in;
+}
+
+.receipt-bottom p {
+  color: #384952;
+  display: grid;
+  font-size: 17px;
+  grid-template-columns: 180px 1fr;
+  margin-bottom: 0.08in;
+}
+
+.receipt-bottom p strong::before {
+  content: ": ";
+}
+
+.receipt-total {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: 180px 1fr;
+  margin-top: 0.28in;
+}
+
+.receipt-note {
+  display: block !important;
+  max-width: 4.4in;
+}
+
+.receipt-footer-brand {
+  align-self: end;
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+  text-align: right;
+}
+
+.receipt-footer-brand h3 {
+  font-size: 28px;
+}
+
+.receipt-footer-brand p {
+  display: block;
+  font-size: 25px;
+}
+
+.receipt-footer-brand span {
+  color: #384952;
+  font-size: 17px;
+}
+
 @media print {
   @page {
     size: letter portrait;
@@ -1843,7 +2088,8 @@ h3 {
     padding: 0;
   }
 
-  .quote-paper {
+  .quote-paper,
+  .receipt-paper {
     border: 0;
     height: 11in;
     margin: 0;
@@ -1862,6 +2108,10 @@ h3 {
   }
 
   .quotes-layout .quote-preview-wrap {
+    grid-column: auto;
+  }
+
+  .receipt-preview-wrap {
     grid-column: auto;
   }
 }
