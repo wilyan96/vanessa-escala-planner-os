@@ -1184,36 +1184,7 @@ const initialPayments: Payment[] = [
   }
 ];
 
-const initialReceipts: Receipt[] = [
-  {
-    id: "rc-1",
-    receiptNumber: "REC-250",
-    client: "Mariana Lopez",
-    clientEmail: "mariana@example.com",
-    clientPhone: "+507 6123-4455",
-    eventId: "ev-1",
-    eventName: "Boda Valeria & Andres",
-    eventDate: "18 jul 2026",
-    eventPlace: "Casa Veranda",
-    accountNumber: "VE-000250",
-    issueDate: "01 jul 2026",
-    paymentDueDate: "01 jul 2026",
-    paymentMethod: "ACH",
-    serviceCharge: 0,
-    itbmsRate: 0,
-    deliveryFee: 0,
-    notes: "Recibo por reserva de fecha del evento.",
-    items: [
-      {
-        id: "ri-1",
-        description: "Reserva de fecha",
-        quantity: 1,
-        unitPrice: 12000
-      }
-    ],
-    status: "Pagado"
-  }
-];
+const initialReceipts: Receipt[] = [];
 
 const initialDocuments: DocumentItem[] = [
   {
@@ -2609,6 +2580,9 @@ export default function Home() {
   const [clientSyncStatus, setClientSyncStatus] = useState<
     "demo" | "error" | "loading" | "synced"
   >("demo");
+  const [receiptSyncStatus, setReceiptSyncStatus] = useState<
+    "demo" | "error" | "loading" | "synced"
+  >("demo");
 
   const [selectedClientId, setSelectedClientId] = useState(initialClients[0].id);
   const [selectedEventId, setSelectedEventId] = useState(initialEvents[0].id);
@@ -2696,6 +2670,32 @@ export default function Home() {
       .catch(() => {
         if (!isCurrent) return;
         setClientSyncStatus("error");
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    let isCurrent = true;
+    setReceiptSyncStatus("loading");
+
+    fetch("/api/receipts")
+      .then((response) => {
+        if (!response.ok) throw new Error("No se pudieron cargar recibos");
+        return response.json() as Promise<Receipt[]>;
+      })
+      .then((databaseReceipts) => {
+        if (!isCurrent) return;
+        setReceipts(databaseReceipts);
+        setReceiptSyncStatus("synced");
+      })
+      .catch(() => {
+        if (!isCurrent) return;
+        setReceiptSyncStatus("error");
       });
 
     return () => {
@@ -2799,6 +2799,81 @@ export default function Home() {
     } catch {
       setClients(previousClients);
       setClientSyncStatus("error");
+    }
+  }
+
+  async function saveReceipt(receipt: Receipt) {
+    const previousReceipts = receipts;
+    const isEditing = Boolean(receipt.id);
+    const receiptNumber = receipt.receiptNumber || nextReceiptNumber(receipts);
+    const normalizedReceipt = {
+      ...receipt,
+      accountNumber: receipt.accountNumber || `VE-${receiptNumber.replace("REC-", "").padStart(6, "0")}`,
+      receiptNumber
+    };
+    const optimisticReceipt = isEditing
+      ? normalizedReceipt
+      : { ...normalizedReceipt, id: makeId("rc") };
+
+    setReceipts((current) =>
+      isEditing
+        ? current.map((item) => (item.id === receipt.id ? normalizedReceipt : item))
+        : [...current, optimisticReceipt]
+    );
+
+    try {
+      const response = await fetch(
+        isEditing ? `/api/receipts/${receipt.id}` : "/api/receipts",
+        {
+          body: JSON.stringify(normalizedReceipt),
+          headers: {
+            "Content-Type": "application/json"
+          },
+          method: isEditing ? "PUT" : "POST"
+        }
+      );
+      if (!response.ok) throw new Error("No se pudo guardar el recibo");
+      const savedReceipt = (await response.json()) as Receipt;
+      setReceipts((current) =>
+        isEditing
+          ? current.map((item) => (item.id === savedReceipt.id ? savedReceipt : item))
+          : current.map((item) =>
+              item.id === optimisticReceipt.id ? savedReceipt : item
+            )
+      );
+      setReceiptSyncStatus("synced");
+    } catch {
+      setReceipts(previousReceipts);
+      setReceiptSyncStatus("error");
+    }
+  }
+
+  async function duplicateReceipt(receipt: Receipt) {
+    await saveReceipt({
+      ...receipt,
+      id: "",
+      receiptNumber: "",
+      status: "Borrador",
+      items: receipt.items.map((item) => ({
+        ...item,
+        id: makeId("ri")
+      }))
+    });
+  }
+
+  async function deleteReceipt(id: string) {
+    const previousReceipts = receipts;
+    setReceipts((current) => current.filter((item) => item.id !== id));
+
+    try {
+      const response = await fetch(`/api/receipts/${id}`, {
+        method: "DELETE"
+      });
+      if (!response.ok) throw new Error("No se pudo eliminar el recibo");
+      setReceiptSyncStatus("synced");
+    } catch {
+      setReceipts(previousReceipts);
+      setReceiptSyncStatus("error");
     }
   }
 
@@ -3022,40 +3097,11 @@ export default function Home() {
         {activeModule === "receipts" && (
           <ReceiptsView
             events={events}
-            onDelete={(id) =>
-              setReceipts((current) => current.filter((item) => item.id !== id))
-            }
-            onDuplicate={(receipt) =>
-              setReceipts((current) => [
-                ...current,
-                {
-                  ...receipt,
-                  id: makeId("rc"),
-                  receiptNumber: nextReceiptNumber(current),
-                  status: "Borrador",
-                  items: receipt.items.map((item) => ({
-                    ...item,
-                    id: makeId("ri")
-                  }))
-                }
-              ])
-            }
-            onSave={(receipt) => {
-              setReceipts((current) =>
-                receipt.id
-                  ? current.map((item) => (item.id === receipt.id ? receipt : item))
-                  : [
-                      ...current,
-                      {
-                        ...receipt,
-                        accountNumber: receipt.accountNumber || `VE-${nextReceiptNumber(current).replace("REC-", "").padStart(6, "0")}`,
-                        id: makeId("rc"),
-                        receiptNumber: nextReceiptNumber(current)
-                      }
-                    ]
-              );
-            }}
+            onDelete={deleteReceipt}
+            onDuplicate={duplicateReceipt}
+            onSave={saveReceipt}
             receipts={receipts}
+            syncStatus={receiptSyncStatus}
           />
         )}
 
@@ -4377,13 +4423,15 @@ function ReceiptsView({
   onDelete,
   onDuplicate,
   onSave,
-  receipts
+  receipts,
+  syncStatus
 }: Readonly<{
   events: EventRecord[];
-  onDelete: (id: string) => void;
-  onDuplicate: (receipt: Receipt) => void;
-  onSave: (receipt: Receipt) => void;
+  onDelete: (id: string) => Promise<void> | void;
+  onDuplicate: (receipt: Receipt) => Promise<void> | void;
+  onSave: (receipt: Receipt) => Promise<void> | void;
   receipts: Receipt[];
+  syncStatus: "demo" | "error" | "loading" | "synced";
 }>) {
   const [draft, setDraft] = useState<Receipt>(blankReceipt);
   const [pendingPrintReceiptId, setPendingPrintReceiptId] = useState<string | null>(null);
@@ -4415,6 +4463,25 @@ function ReceiptsView({
   return (
     <section className="module-grid quotes-layout">
       <Panel title="Recibos de pago">
+        <div className="sync-banner">
+          <Status
+            label={
+              syncStatus === "synced"
+                ? "Recibos conectados a Prisma"
+                : syncStatus === "loading"
+                  ? "Sincronizando recibos"
+                  : syncStatus === "error"
+                    ? "Error al guardar recibos"
+                    : "Recibos pendientes de sincronizar"
+            }
+            tone={syncStatus === "synced" ? "success" : syncStatus === "error" ? "warning" : "neutral"}
+          />
+          <span>
+            {syncStatus === "synced"
+              ? "Los recibos quedan guardados en la base de datos y se recuperan al abrir la app."
+              : "Si ves este aviso, no cierres la app sin revisar la conexion con Prisma."}
+          </span>
+        </div>
         <DataTable
           headers={["No.", "Cliente", "Evento", "Total", "Fecha", "Estado", "Acciones"]}
           rows={receipts.map((receipt) => [

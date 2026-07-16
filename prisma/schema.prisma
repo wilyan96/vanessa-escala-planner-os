@@ -122,33 +122,34 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users     User[]
-  clients   Client[]
-  events    Event[]
-  vendors   Vendor[]
-  templates Template[]
-  alerts    Alert[]
-  emails    Email[]
+  users          User[]
+  clients        Client[]
+  events         Event[]
+  vendors        Vendor[]
+  templates      Template[]
+  alerts         Alert[]
+  emails         Email[]
+  receipts       Receipt[]
   calendarEvents CalendarEvent[]
-  activityLogs ActivityLog[]
-  reports   Report[]
+  activityLogs   ActivityLog[]
+  reports        Report[]
 }
 
 model User {
-  id             String       @id @default(cuid())
+  id             String   @id @default(cuid())
   organizationId String
-  email          String       @unique
+  email          String   @unique
   name           String
   role           UserRole
   phone          String?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id])
-  assignments  TeamMember[]
-  tasks        Task[]       @relation("TaskAssignee")
-  assignedAlerts Alert[]    @relation("AlertAssignee")
-  activityLogs ActivityLog[]
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  assignments    TeamMember[]
+  tasks          Task[]        @relation("TaskAssignee")
+  assignedAlerts Alert[]       @relation("AlertAssignee")
+  activityLogs   ActivityLog[]
 }
 
 model Client {
@@ -170,22 +171,22 @@ model Client {
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id])
-  events       Event[]
-  interactions Interaction[]
-  documents    Document[]
-  quotes       Quote[]
-  contracts    Contract[]
-  payments     Payment[]
-  alerts       Alert[]
-  emails       Email[]
+  organization   Organization    @relation(fields: [organizationId], references: [id])
+  events         Event[]
+  interactions   Interaction[]
+  documents      Document[]
+  quotes         Quote[]
+  contracts      Contract[]
+  payments       Payment[]
+  alerts         Alert[]
+  emails         Email[]
   calendarEvents CalendarEvent[]
-  activityLogs ActivityLog[]
-  reports      Report[]
+  activityLogs   ActivityLog[]
+  reports        Report[]
 }
 
 model Event {
-  id                   String      @id @default(cuid())
+  id                    String      @id @default(cuid())
   organizationId        String
   clientId              String
   name                  String
@@ -208,40 +209,40 @@ model Event {
   createdAt             DateTime    @default(now())
   updatedAt             DateTime    @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id])
-  client       Client       @relation(fields: [clientId], references: [id])
-  services     EventService[]
-  quotes       Quote[]
-  contracts    Contract[]
-  timeline     TimelineItem[]
-  tasks        Task[]
-  vendors      EventVendor[]
-  team         TeamMember[]
-  guests       Guest[]
-  tables       SeatingTable[]
-  documents    Document[]
-  payments     Payment[]
-  expenses     Expense[]
+  organization     Organization      @relation(fields: [organizationId], references: [id])
+  client           Client            @relation(fields: [clientId], references: [id])
+  services         EventService[]
+  quotes           Quote[]
+  contracts        Contract[]
+  timeline         TimelineItem[]
+  tasks            Task[]
+  vendors          EventVendor[]
+  team             TeamMember[]
+  guests           Guest[]
+  tables           SeatingTable[]
+  documents        Document[]
+  payments         Payment[]
+  expenses         Expense[]
   providerPayments ProviderPayment[]
-  alerts      Alert[]
-  emails      Email[]
-  calendarEvents CalendarEvent[]
-  activityLogs ActivityLog[]
-  reports     Report[]
+  alerts           Alert[]
+  emails           Email[]
+  calendarEvents   CalendarEvent[]
+  activityLogs     ActivityLog[]
+  reports          Report[]
 }
 
 model EventService {
-  id          String   @id @default(cuid())
-  eventId     String
-  name        String
-  category    String
-  description String?
-  quantity    Int      @default(1)
-  unitPrice   Decimal  @default(0)
-  status      String   @default("pending")
-  vendorRequired Boolean @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id             String   @id @default(cuid())
+  eventId        String
+  name           String
+  category       String
+  description    String?
+  quantity       Int      @default(1)
+  unitPrice      Decimal  @default(0)
+  status         String   @default("pending")
+  vendorRequired Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   event Event @relation(fields: [eventId], references: [id])
 }
@@ -274,49 +275,49 @@ model Task {
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 
-  event    Event? @relation(fields: [eventId], references: [id])
-  assignee User?  @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  event    Event?  @relation(fields: [eventId], references: [id])
+  assignee User?   @relation("TaskAssignee", fields: [assigneeId], references: [id])
   alerts   Alert[]
 }
 
 model Vendor {
-  id              String       @id @default(cuid())
-  organizationId  String
-  name            String
-  category        String
-  contactName     String?
-  phone           String?
-  email           String?
-  socialLinks     Json?
-  referenceRates  Decimal?
-  notes           String?
-  status          VendorStatus @default(ACTIVE)
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  category       String
+  contactName    String?
+  phone          String?
+  email          String?
+  socialLinks    Json?
+  referenceRates Decimal?
+  notes          String?
+  status         VendorStatus @default(ACTIVE)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id])
-  events       EventVendor[]
-  timeline     TimelineItem[]
-  documents    Document[]
-  expenses     Expense[]
+  organization     Organization      @relation(fields: [organizationId], references: [id])
+  events           EventVendor[]
+  timeline         TimelineItem[]
+  documents        Document[]
+  expenses         Expense[]
   providerPayments ProviderPayment[]
-  alerts       Alert[]
+  alerts           Alert[]
 }
 
 model EventVendor {
-  id        String @id @default(cuid())
-  eventId   String
-  vendorId  String
-  service   String
-  status    String @default("pending")
+  id               String    @id @default(cuid())
+  eventId          String
+  vendorId         String
+  service          String
+  status           String    @default("pending")
   contractedAmount Decimal?
-  paidAmount       Decimal @default(0)
-  contractStatus   String  @default("pending")
-  paymentStatus    String  @default("pending")
+  paidAmount       Decimal   @default(0)
+  contractStatus   String    @default("pending")
+  paymentStatus    String    @default("pending")
   arrivalAt        DateTime?
   confirmedAt      DateTime?
   rating           Int?
-  notes     String?
+  notes            String?
 
   event  Event  @relation(fields: [eventId], references: [id])
   vendor Vendor @relation(fields: [vendorId], references: [id])
@@ -332,16 +333,16 @@ model Quote {
   expiresAt   DateTime
   subtotal    Decimal
   discount    Decimal  @default(0)
-  tax          Decimal  @default(0)
-  total        Decimal
+  tax         Decimal  @default(0)
+  total       Decimal
   status      String   @default("draft")
   notes       String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  client Client      @relation(fields: [clientId], references: [id])
-  event  Event?      @relation(fields: [eventId], references: [id])
-  items  QuoteItem[]
+  client    Client      @relation(fields: [clientId], references: [id])
+  event     Event?      @relation(fields: [eventId], references: [id])
+  items     QuoteItem[]
   contracts Contract[]
 }
 
@@ -358,29 +359,29 @@ model QuoteItem {
 }
 
 model Contract {
-  id         String   @id @default(cuid())
-  clientId   String
-  eventId    String?
-  quoteId    String?
-  templateId String?
-  title      String
-  content    String
-  status     String   @default("draft")
-  sentAt     DateTime?
+  id                String    @id @default(cuid())
+  clientId          String
+  eventId           String?
+  quoteId           String?
+  templateId        String?
+  title             String
+  content           String
+  status            String    @default("draft")
+  sentAt            DateTime?
   signatureDeadline DateTime?
-  signedAt   DateTime?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  signedAt          DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  client Client @relation(fields: [clientId], references: [id])
-  event  Event? @relation(fields: [eventId], references: [id])
-  quote  Quote? @relation(fields: [quoteId], references: [id])
+  client    Client     @relation(fields: [clientId], references: [id])
+  event     Event?     @relation(fields: [eventId], references: [id])
+  quote     Quote?     @relation(fields: [quoteId], references: [id])
   documents Document[]
-  alerts Alert[]
+  alerts    Alert[]
 }
 
 model Payment {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   clientId    String
   eventId     String?
   amount      Decimal
@@ -388,17 +389,57 @@ model Payment {
   paidAt      DateTime?
   method      String?
   receiptUrl  String?
-  status      String   @default("pending")
+  status      String    @default("pending")
   description String?
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
 
-  client Client @relation(fields: [clientId], references: [id])
-  event  Event? @relation(fields: [eventId], references: [id])
+  client Client  @relation(fields: [clientId], references: [id])
+  event  Event?  @relation(fields: [eventId], references: [id])
   alerts Alert[]
 }
 
+model Receipt {
+  id             String   @id @default(cuid())
+  organizationId String
+  eventId        String?
+  receiptNumber  String   @unique
+  client         String
+  clientEmail    String?
+  clientPhone    String?
+  eventName      String?
+  eventDate      String?
+  eventPlace     String?
+  accountNumber  String?
+  issueDate      String?
+  paymentDueDate String?
+  paymentMethod  String?
+  serviceCharge  Decimal  @default(0)
+  itbmsRate      Decimal  @default(0)
+  deliveryFee    Decimal  @default(0)
+  notes          String?
+  status         String   @default("Borrador")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id])
+  items        ReceiptItem[]
+
+  @@index([organizationId, receiptNumber])
+  @@index([eventId])
+}
+
+model ReceiptItem {
+  id          String  @id @default(cuid())
+  receiptId   String
+  description String
+  quantity    Int     @default(1)
+  unitPrice   Decimal @default(0)
+
+  receipt Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+}
+
 model Expense {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   eventId     String
   vendorId    String?
   amount      Decimal
@@ -406,58 +447,58 @@ model Expense {
   description String?
   dueDate     DateTime?
   paidAt      DateTime?
-  status      String   @default("pending")
-  createdAt   DateTime @default(now())
+  status      String    @default("pending")
+  createdAt   DateTime  @default(now())
 
-  event Event @relation(fields: [eventId], references: [id])
+  event  Event   @relation(fields: [eventId], references: [id])
   vendor Vendor? @relation(fields: [vendorId], references: [id])
 }
 
 model ProviderPayment {
-  id          String   @id @default(cuid())
-  eventId     String
-  vendorId    String
-  amount      Decimal
-  paidAmount  Decimal  @default(0)
-  dueDate     DateTime?
-  paidAt      DateTime?
-  method      String?
-  receiptUrl  String?
-  status      String   @default("pending")
-  notes       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String    @id @default(cuid())
+  eventId    String
+  vendorId   String
+  amount     Decimal
+  paidAmount Decimal   @default(0)
+  dueDate    DateTime?
+  paidAt     DateTime?
+  method     String?
+  receiptUrl String?
+  status     String    @default("pending")
+  notes      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   event  Event  @relation(fields: [eventId], references: [id])
   vendor Vendor @relation(fields: [vendorId], references: [id])
 }
 
 model Document {
-  id          String       @id @default(cuid())
-  clientId    String?
-  eventId     String?
-  vendorId    String?
-  kind        DocumentKind
-  name        String
-  url         String
-  mimeType    String
-  sizeBytes   Int?
-  isInternal  Boolean      @default(true)
-  contractId  String?
-  createdAt   DateTime     @default(now())
+  id         String       @id @default(cuid())
+  clientId   String?
+  eventId    String?
+  vendorId   String?
+  kind       DocumentKind
+  name       String
+  url        String
+  mimeType   String
+  sizeBytes  Int?
+  isInternal Boolean      @default(true)
+  contractId String?
+  createdAt  DateTime     @default(now())
 
-  client Client? @relation(fields: [clientId], references: [id])
-  event  Event?  @relation(fields: [eventId], references: [id])
-  vendor Vendor? @relation(fields: [vendorId], references: [id])
+  client   Client?   @relation(fields: [clientId], references: [id])
+  event    Event?    @relation(fields: [eventId], references: [id])
+  vendor   Vendor?   @relation(fields: [vendorId], references: [id])
   contract Contract? @relation(fields: [contractId], references: [id])
 }
 
 model Guest {
-  id             String @id @default(cuid())
+  id             String  @id @default(cuid())
   eventId        String
   fullName       String
-  rsvpStatus     String @default("pending")
-  companions     Int    @default(0)
+  rsvpStatus     String  @default("pending")
+  companions     Int     @default(0)
   specialMenu    String?
   notes          String?
   seatingTableId String?
@@ -478,27 +519,27 @@ model SeatingTable {
 }
 
 model TeamMember {
-  id         String   @id @default(cuid())
-  eventId    String
-  userId     String
-  role       String
-  startsAt   DateTime?
-  endsAt     DateTime?
-  agreedPay  Decimal?
-  paymentStatus String @default("pending")
+  id            String    @id @default(cuid())
+  eventId       String
+  userId        String
+  role          String
+  startsAt      DateTime?
+  endsAt        DateTime?
+  agreedPay     Decimal?
+  paymentStatus String    @default("pending")
 
   event Event @relation(fields: [eventId], references: [id])
   user  User  @relation(fields: [userId], references: [id])
 }
 
 model Interaction {
-  id        String   @id @default(cuid())
-  clientId  String
-  channel   String
-  subject   String?
-  body      String
-  sentAt    DateTime @default(now())
-  metadata  Json?
+  id       String   @id @default(cuid())
+  clientId String
+  channel  String
+  subject  String?
+  body     String
+  sentAt   DateTime @default(now())
+  metadata Json?
 
   client Client @relation(fields: [clientId], references: [id])
 }
@@ -516,24 +557,24 @@ model Template {
 }
 
 model Alert {
-  id             String        @id @default(cuid())
-  organizationId String
-  clientId       String?
-  eventId        String?
-  contractId     String?
-  paymentId      String?
-  vendorId       String?
-  taskId         String?
-  assigneeId     String?
-  title          String
-  category       AlertCategory
-  priority       AlertPriority
-  dueDate        DateTime?
-  status         AlertStatus   @default(OPEN)
+  id                String        @id @default(cuid())
+  organizationId    String
+  clientId          String?
+  eventId           String?
+  contractId        String?
+  paymentId         String?
+  vendorId          String?
+  taskId            String?
+  assigneeId        String?
+  title             String
+  category          AlertCategory
+  priority          AlertPriority
+  dueDate           DateTime?
+  status            AlertStatus   @default(OPEN)
   recommendedAction String
-  resolvedAt     DateTime?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  resolvedAt        DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id])
   client       Client?      @relation(fields: [clientId], references: [id])
@@ -550,7 +591,7 @@ model Alert {
 }
 
 model Email {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   organizationId String
   clientId       String?
   eventId        String?
@@ -558,10 +599,10 @@ model Email {
   to             String
   subject        String
   body           String
-  status         String   @default("draft")
+  status         String    @default("draft")
   provider       String?
   sentAt         DateTime?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime  @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id])
   client       Client?      @relation(fields: [clientId], references: [id])
@@ -569,19 +610,19 @@ model Email {
 }
 
 model CalendarEvent {
-  id             String            @id @default(cuid())
-  organizationId String
-  clientId       String?
-  eventId        String?
-  kind           CalendarEventKind
-  title          String
-  startsAt       DateTime
-  endsAt         DateTime?
-  location       String?
+  id                    String            @id @default(cuid())
+  organizationId        String
+  clientId              String?
+  eventId               String?
+  kind                  CalendarEventKind
+  title                 String
+  startsAt              DateTime
+  endsAt                DateTime?
+  location              String?
   googleCalendarEventId String?
-  status         String            @default("scheduled")
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  status                String            @default("scheduled")
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id])
   client       Client?      @relation(fields: [clientId], references: [id])
@@ -603,9 +644,9 @@ model ActivityLog {
   createdAt      DateTime @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id])
-  user         User?       @relation(fields: [userId], references: [id])
-  client       Client?     @relation(fields: [clientId], references: [id])
-  event        Event?      @relation(fields: [eventId], references: [id])
+  user         User?        @relation(fields: [userId], references: [id])
+  client       Client?      @relation(fields: [clientId], references: [id])
+  event        Event?       @relation(fields: [eventId], references: [id])
 
   @@index([organizationId, createdAt])
   @@index([eventId])
