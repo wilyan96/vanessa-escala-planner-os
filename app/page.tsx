@@ -640,7 +640,7 @@ function enrichEvent(event: Omit<EventRecord, "eventNumber" | "clientPhone" | "c
   const paid = event.paid ?? money(Math.round(budgetNumber * 0.45));
   return {
     eventNumber: event.eventNumber ?? "VE-EVT-2026-0001",
-    clientPhone: event.clientPhone ?? "+507 6000-0000",
+    clientPhone: event.clientPhone ?? "+507 6371-2318",
     clientEmail: event.clientEmail ?? "cliente@example.com",
     decisionMaker: event.decisionMaker ?? event.clientName,
     emergencyContact: event.emergencyContact ?? "",
@@ -1918,7 +1918,7 @@ async function createReceiptPdf(receipt: Receipt) {
   context.fillStyle = "#374151";
   context.font = "24px Arial";
   context.fillText("Panama", 1130, 1448);
-  context.fillText("+507 6000-0000", 1130, 1500);
+  context.fillText("+507 6371-2318", 1130, 1500);
   context.fillText("vanessaescalaplanner@gmail.com", 1130, 1552);
   context.textAlign = "left";
 
@@ -4673,7 +4673,7 @@ function ReceiptPreview({ receipt }: Readonly<{ receipt: Receipt }>) {
             <h3>Vanessa Escala</h3>
             <p>Wedding & Events Planner</p>
             <span>Panama</span>
-            <span>+507 6000-0000</span>
+            <span>+507 6371-2318</span>
             <span>vanessaescalaplanner@gmail.com</span>
           </div>
         </section>
