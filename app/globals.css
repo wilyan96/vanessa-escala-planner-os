@@ -1213,6 +1213,126 @@ h3 {
   font-size: 13px;
 }
 
+.receipts-workspace {
+  display: grid;
+  gap: 14px;
+}
+
+.receipt-mode-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.receipt-history-summary {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 12px;
+}
+
+.receipt-history-summary div {
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  min-height: 70px;
+  padding: 12px;
+}
+
+.receipt-history-summary span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.receipt-history-summary strong {
+  font-size: 22px;
+}
+
+.receipt-history-toolbar {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  margin-bottom: 12px;
+}
+
+.receipt-search-control {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  display: flex;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 12px;
+}
+
+.receipt-search-control input {
+  border: 0;
+  font-size: 15px;
+  min-width: 0;
+  outline: 0;
+  width: 100%;
+}
+
+.receipt-filter-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: minmax(210px, 0.32fr) minmax(0, 1fr);
+  margin-bottom: 14px;
+  overflow: hidden;
+}
+
+.receipt-filter-presets {
+  background: var(--surface-soft);
+  border-right: 1px solid var(--line);
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  padding: 12px;
+}
+
+.receipt-filter-presets button {
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 15px;
+  min-height: 40px;
+  padding: 0 10px;
+  text-align: left;
+}
+
+.receipt-filter-presets button.active,
+.receipt-filter-presets button:hover {
+  background: #ffffff;
+  color: var(--gold);
+}
+
+.receipt-filter-fields {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 14px;
+}
+
+.receipt-filter-actions {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.empty-state {
+  color: var(--muted);
+  padding: 18px 6px 4px;
+}
+
 .upload-box {
   align-items: center;
   background: var(--surface-soft);
@@ -2149,6 +2269,17 @@ h3 {
 
   .contract-filters {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .receipt-filter-panel,
+  .receipt-history-summary,
+  .receipt-history-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .receipt-filter-presets {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
   }
 
   .contract-date-grid {

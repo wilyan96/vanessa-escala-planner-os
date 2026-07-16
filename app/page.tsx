@@ -328,11 +328,49 @@ type AutomationSnapshot = {
 const APP_PASSWORD_HASH =
   "12476a5da8dc634d28e04f0e423c3175f49624239d029e5884c7599a056ab723";
 const AUTH_STORAGE_KEY = "vanessa-planner-authenticated";
+const CLIENTS_CACHE_KEY = "vanessa-planner-cache-clients";
 const PUBLIC_BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+const RECEIPTS_CACHE_KEY = "vanessa-planner-cache-receipts";
 const RECEIPT_START_NUMBER = 250;
+const DATA_CACHE_TTL_MS = 30 * 60 * 1000;
+
+type LocalCacheEnvelope<T> = {
+  savedAt: number;
+  value: T;
+};
 
 function publicAssetPath(path: string) {
   return `${PUBLIC_BASE_PATH}${path}`;
+}
+
+function readLocalCache<T>(key: string, maxAgeMs = DATA_CACHE_TTL_MS) {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as LocalCacheEnvelope<T>;
+    if (!parsed.savedAt || Date.now() - parsed.savedAt > maxAgeMs) return null;
+    return parsed.value;
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalCache<T>(key: string, value: T) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      key,
+      JSON.stringify({
+        savedAt: Date.now(),
+        value
+      } satisfies LocalCacheEnvelope<T>)
+    );
+  } catch {
+    // Cache is an optimization only; Prisma remains the source of truth.
+  }
 }
 
 const nav = [
@@ -2651,6 +2689,14 @@ export default function Home() {
   useEffect(() => {
     if (!isAuthenticated) return;
 
+    const cachedClients = readLocalCache<Client[]>(CLIENTS_CACHE_KEY);
+    if (cachedClients?.length) {
+      setClients(cachedClients);
+      setSelectedClientId(cachedClients[0].id);
+      setClientSyncStatus("synced");
+      return;
+    }
+
     let isCurrent = true;
     setClientSyncStatus("loading");
 
@@ -2664,6 +2710,7 @@ export default function Home() {
         setClientSyncStatus("synced");
         if (databaseClients.length > 0) {
           setClients(databaseClients);
+          writeLocalCache(CLIENTS_CACHE_KEY, databaseClients);
           setSelectedClientId(databaseClients[0].id);
         }
       })
@@ -2680,6 +2727,13 @@ export default function Home() {
   useEffect(() => {
     if (!isAuthenticated) return;
 
+    const cachedReceipts = readLocalCache<Receipt[]>(RECEIPTS_CACHE_KEY);
+    if (cachedReceipts?.length) {
+      setReceipts(cachedReceipts);
+      setReceiptSyncStatus("synced");
+      return;
+    }
+
     let isCurrent = true;
     setReceiptSyncStatus("loading");
 
@@ -2691,6 +2745,7 @@ export default function Home() {
       .then((databaseReceipts) => {
         if (!isCurrent) return;
         setReceipts(databaseReceipts);
+        writeLocalCache(RECEIPTS_CACHE_KEY, databaseReceipts);
         setReceiptSyncStatus("synced");
       })
       .catch(() => {
@@ -2777,6 +2832,12 @@ export default function Home() {
               item.id === optimisticClient.id ? savedClient : item
             )
       );
+      writeLocalCache(
+        CLIENTS_CACHE_KEY,
+        isEditing
+          ? previousClients.map((item) => (item.id === savedClient.id ? savedClient : item))
+          : [...previousClients, savedClient]
+      );
       setSelectedClientId(savedClient.id);
       setClientSyncStatus("synced");
     } catch {
@@ -2795,6 +2856,10 @@ export default function Home() {
         method: "DELETE"
       });
       if (!response.ok) throw new Error("No se pudo eliminar el cliente");
+      writeLocalCache(
+        CLIENTS_CACHE_KEY,
+        previousClients.filter((item) => item.id !== id)
+      );
       setClientSyncStatus("synced");
     } catch {
       setClients(previousClients);
@@ -2841,6 +2906,12 @@ export default function Home() {
               item.id === optimisticReceipt.id ? savedReceipt : item
             )
       );
+      writeLocalCache(
+        RECEIPTS_CACHE_KEY,
+        isEditing
+          ? previousReceipts.map((item) => (item.id === savedReceipt.id ? savedReceipt : item))
+          : [...previousReceipts, savedReceipt]
+      );
       setReceiptSyncStatus("synced");
     } catch {
       setReceipts(previousReceipts);
@@ -2870,6 +2941,10 @@ export default function Home() {
         method: "DELETE"
       });
       if (!response.ok) throw new Error("No se pudo eliminar el recibo");
+      writeLocalCache(
+        RECEIPTS_CACHE_KEY,
+        previousReceipts.filter((item) => item.id !== id)
+      );
       setReceiptSyncStatus("synced");
     } catch {
       setReceipts(previousReceipts);
@@ -4434,8 +4509,41 @@ function ReceiptsView({
   syncStatus: "demo" | "error" | "loading" | "synced";
 }>) {
   const [draft, setDraft] = useState<Receipt>(blankReceipt);
+  const [dateFilter, setDateFilter] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [numberFilter, setNumberFilter] = useState("");
   const [pendingPrintReceiptId, setPendingPrintReceiptId] = useState<string | null>(null);
-  const previewReceipt = draft.id || draft.client ? draft : receipts[0];
+  const [query, setQuery] = useState("");
+  const [selectedReceiptId, setSelectedReceiptId] = useState(receipts[0]?.id ?? "");
+  const [statusFilter, setStatusFilter] = useState("Todos");
+  const [viewMode, setViewMode] = useState<"form" | "history">("history");
+
+  const filteredReceipts = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    const normalizedNumber = numberFilter.trim().toLowerCase();
+    const normalizedDate = dateFilter.trim().toLowerCase();
+
+    return receipts.filter((receipt) => {
+      const searchable = `${receipt.client} ${receipt.receiptNumber} ${receipt.issueDate} ${receipt.status} ${receipt.eventName}`.toLowerCase();
+      const matchesQuery = !normalizedQuery || searchable.includes(normalizedQuery);
+      const matchesNumber =
+        !normalizedNumber || receipt.receiptNumber.toLowerCase().includes(normalizedNumber);
+      const matchesDate =
+        !normalizedDate || receipt.issueDate.toLowerCase().includes(normalizedDate);
+      const matchesStatus =
+        statusFilter === "Todos" || receipt.status === statusFilter;
+      return matchesQuery && matchesNumber && matchesDate && matchesStatus;
+    });
+  }, [dateFilter, numberFilter, query, receipts, statusFilter]);
+
+  const selectedReceipt =
+    receipts.find((receipt) => receipt.id === selectedReceiptId) ?? filteredReceipts[0];
+  const previewReceipt =
+    viewMode === "form" && (draft.id || draft.client) ? draft : selectedReceipt;
+  const totalFiltered = filteredReceipts.reduce(
+    (sum, receipt) => sum + receiptTotals(receipt).total,
+    0
+  );
 
   useEffect(() => {
     if (!pendingPrintReceiptId || previewReceipt?.id !== pendingPrintReceiptId) return;
@@ -4448,68 +4556,226 @@ function ReceiptsView({
     return () => window.clearTimeout(timer);
   }, [pendingPrintReceiptId, previewReceipt]);
 
+  useEffect(() => {
+    if (!selectedReceiptId && receipts[0]) setSelectedReceiptId(receipts[0].id);
+  }, [receipts, selectedReceiptId]);
+
   function printReceipt(receipt: Receipt) {
-    setDraft(receipt);
+    setSelectedReceiptId(receipt.id);
     setPendingPrintReceiptId(receipt.id);
   }
 
-  function submit(event: FormEvent) {
+  async function submit(event: FormEvent) {
     event.preventDefault();
     if (!draft.client.trim()) return;
-    onSave(draft);
+    await onSave(draft);
     setDraft(blankReceipt);
+    setViewMode("history");
+  }
+
+  function editReceipt(receipt: Receipt) {
+    setDraft(receipt);
+    setViewMode("form");
+  }
+
+  function resetFilters() {
+    setDateFilter("");
+    setNumberFilter("");
+    setQuery("");
+    setStatusFilter("Todos");
+  }
+
+  function startNewReceipt() {
+    setDraft(blankReceipt);
+    setViewMode("form");
   }
 
   return (
-    <section className="module-grid quotes-layout">
-      <Panel title="Recibos de pago">
-        <div className="sync-banner">
-          <Status
-            label={
-              syncStatus === "synced"
-                ? "Recibos conectados a Prisma"
-                : syncStatus === "loading"
-                  ? "Sincronizando recibos"
-                  : syncStatus === "error"
-                    ? "Error al guardar recibos"
-                    : "Recibos pendientes de sincronizar"
-            }
-            tone={syncStatus === "synced" ? "success" : syncStatus === "error" ? "warning" : "neutral"}
-          />
-          <span>
-            {syncStatus === "synced"
-              ? "Los recibos quedan guardados en la base de datos y se recuperan al abrir la app."
-              : "Si ves este aviso, no cierres la app sin revisar la conexion con Prisma."}
-          </span>
-        </div>
-        <DataTable
-          headers={["No.", "Cliente", "Evento", "Total", "Fecha", "Estado", "Acciones"]}
-          rows={receipts.map((receipt) => [
-            receipt.receiptNumber,
-            receipt.client,
-            receipt.eventName,
-            money(receiptTotals(receipt).total),
-            receipt.issueDate,
-            <ReceiptStatusSelect
-              key="status"
-              onChange={(status) => onSave({ ...receipt, status })}
-              value={receipt.status}
-            />,
-            <ReceiptTableActions
-              key="actions"
-              onDelete={() => onDelete(receipt.id)}
-              onDuplicate={() => onDuplicate(receipt)}
-              onEdit={() => setDraft(receipt)}
-              onPrint={() => printReceipt(receipt)}
-              receipt={receipt}
-            />
-          ])}
-        />
-      </Panel>
+    <section className="receipts-workspace">
+      <div className="receipt-mode-bar">
+        <button
+          className={`button ${viewMode === "history" ? "primary" : ""}`}
+          onClick={() => setViewMode("history")}
+          type="button"
+        >
+          <FileSignature size={17} aria-hidden="true" />
+          Historial
+        </button>
+        <button
+          className={`button ${viewMode === "form" ? "primary" : ""}`}
+          onClick={startNewReceipt}
+          type="button"
+        >
+          <Plus size={17} aria-hidden="true" />
+          Nuevo recibo
+        </button>
+      </div>
 
-      <Panel title={draft.id ? "Editar recibo" : "Nuevo recibo"}>
-        <ReceiptForm draft={draft} events={events} onCancel={() => setDraft(blankReceipt)} onChange={setDraft} onSubmit={submit} receipts={receipts} />
-      </Panel>
+      {viewMode === "history" && (
+        <Panel
+          title="Historial de recibos de pago"
+          action={
+            <button className="button primary" onClick={startNewReceipt} type="button">
+              <Plus size={17} aria-hidden="true" />
+              Nuevo recibo
+            </button>
+          }
+        >
+          <div className="sync-banner">
+            <Status
+              label={
+                syncStatus === "synced"
+                  ? "Cache local y Prisma activos"
+                  : syncStatus === "loading"
+                    ? "Sincronizando recibos"
+                    : syncStatus === "error"
+                      ? "Error al guardar recibos"
+                      : "Recibos pendientes de sincronizar"
+              }
+              tone={syncStatus === "synced" ? "success" : syncStatus === "error" ? "warning" : "neutral"}
+            />
+            <span>
+              {syncStatus === "synced"
+                ? "La app carga una copia local reciente y reduce consultas a la base de datos."
+                : "Si ves este aviso, revisa la conexion antes de cerrar la app."}
+            </span>
+          </div>
+
+          <div className="receipt-history-summary">
+            <div>
+              <span>Recibos visibles</span>
+              <strong>{filteredReceipts.length}</strong>
+            </div>
+            <div>
+              <span>Total visible</span>
+              <strong>{money(totalFiltered)}</strong>
+            </div>
+            <div>
+              <span>Pagados</span>
+              <strong>{filteredReceipts.filter((receipt) => receipt.status === "Pagado").length}</strong>
+            </div>
+          </div>
+
+          <div className="receipt-history-toolbar">
+            <label className="receipt-search-control">
+              <Search size={18} aria-hidden="true" />
+              <input
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Buscar por cliente, recibo, fecha, estado o evento"
+                value={query}
+              />
+            </label>
+            <button
+              className={`button ${filtersOpen ? "primary" : ""}`}
+              onClick={() => setFiltersOpen((current) => !current)}
+              type="button"
+            >
+              <MoreHorizontal size={17} aria-hidden="true" />
+              Filtrar
+            </button>
+            <button className="button" onClick={resetFilters} type="button">
+              <X size={17} aria-hidden="true" />
+              Reiniciar
+            </button>
+          </div>
+
+          {filtersOpen && (
+            <div className="receipt-filter-panel">
+              <aside className="receipt-filter-presets">
+                {[
+                  { label: "Todos los recibos", status: "Todos" },
+                  { label: "Recibos pagados", status: "Pagado" },
+                  { label: "Borradores", status: "Borrador" },
+                  { label: "Anulados", status: "Anulado" }
+                ].map((preset) => (
+                  <button
+                    className={statusFilter === preset.status ? "active" : ""}
+                    key={preset.label}
+                    onClick={() => setStatusFilter(preset.status)}
+                    type="button"
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </aside>
+              <div className="receipt-filter-fields">
+                <Input label="Nombre del cliente" value={query} onChange={setQuery} />
+                <Input label="Numero de recibo" value={numberFilter} onChange={setNumberFilter} />
+                <Input label="Fecha" value={dateFilter} onChange={setDateFilter} />
+                <label className="field">
+                  <span>Estado</span>
+                  <select
+                    className="input"
+                    onChange={(event) => setStatusFilter(event.target.value)}
+                    value={statusFilter}
+                  >
+                    {["Todos", "Borrador", "Emitido", "Enviado", "Pagado", "Anulado"].map((status) => (
+                      <option key={status}>{status}</option>
+                    ))}
+                  </select>
+                </label>
+                <div className="receipt-filter-actions">
+                  <button className="button primary" onClick={() => setFiltersOpen(false)} type="button">
+                    <Search size={17} aria-hidden="true" />
+                    Buscar
+                  </button>
+                  <button className="button" onClick={resetFilters} type="button">
+                    Reiniciar
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <DataTable
+            headers={["No.", "Cliente", "Evento", "Total", "Fecha", "Estado", "Acciones"]}
+            rows={filteredReceipts.map((receipt) => [
+              <button
+                className="text-button"
+                key="number"
+                onClick={() => setSelectedReceiptId(receipt.id)}
+                type="button"
+              >
+                {receipt.receiptNumber}
+              </button>,
+              receipt.client,
+              receipt.eventName,
+              money(receiptTotals(receipt).total),
+              receipt.issueDate,
+              <ReceiptStatusSelect
+                key="status"
+                onChange={(status) => onSave({ ...receipt, status })}
+                value={receipt.status}
+              />,
+              <ReceiptTableActions
+                key="actions"
+                onDelete={() => onDelete(receipt.id)}
+                onDuplicate={() => onDuplicate(receipt)}
+                onEdit={() => editReceipt(receipt)}
+                onPrint={() => printReceipt(receipt)}
+                receipt={receipt}
+              />
+            ])}
+          />
+          {filteredReceipts.length === 0 && (
+            <div className="empty-state">No hay recibos que coincidan con esos filtros.</div>
+          )}
+        </Panel>
+      )}
+
+      {viewMode === "form" && (
+        <Panel
+          title={draft.id ? "Editar recibo" : "Nuevo recibo"}
+          action={
+            <button className="button" onClick={() => setViewMode("history")} type="button">
+              <FileSignature size={17} aria-hidden="true" />
+              Ver historial
+            </button>
+          }
+        >
+          <ReceiptForm draft={draft} events={events} onCancel={() => setDraft(blankReceipt)} onChange={setDraft} onSubmit={submit} receipts={receipts} />
+        </Panel>
+      )}
 
       {previewReceipt && <ReceiptPreview receipt={previewReceipt} />}
     </section>
