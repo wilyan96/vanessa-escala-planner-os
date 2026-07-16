@@ -314,6 +314,7 @@ type AutomationSnapshot = {
   calendarItems: Array<{ date: string; label: string; type: string }>;
   checklistAreas: Array<{ label: string; value: number; tone: StatusTone }>;
   events: EventRecord[];
+  financeItems: Array<{ amount: number; date: string; label: string; status: string; type: string }>;
   metrics: DashboardMetric[];
   recentActivity: string[];
   totals: {
@@ -2321,6 +2322,7 @@ class AutomationEngine {
       events: EventRecord[];
       payments: Payment[];
       quotes: Quote[];
+      receipts: Receipt[];
       timeline: TimelineItem[];
     },
     private readonly today = new Date()
@@ -2330,12 +2332,13 @@ class AutomationEngine {
     const events = this.input.events.map((event) => this.synchronizeEvent(event));
     const alerts = this.createAlerts(events);
     const totals = this.calculateTotals(events);
+    const financeItems = this.createFinanceItems(events);
     const metrics = this.createMetrics(events, alerts, totals);
     const checklistAreas = this.createChecklistAreas(events, totals);
     const calendarItems = this.createCalendarItems(events);
     const recentActivity = this.createRecentActivity(events, alerts);
 
-    return { alerts, calendarItems, checklistAreas, events, metrics, recentActivity, totals };
+    return { alerts, calendarItems, checklistAreas, events, financeItems, metrics, recentActivity, totals };
   }
 
   private synchronizeEvent(event: EventRecord): EventRecord {
@@ -2536,10 +2539,20 @@ class AutomationEngine {
   }
 
   private calculateTotals(events: EventRecord[]) {
-    const monthIncome = events.reduce((sum, event) => sum + currencyToNumber(event.paid), 0);
+    const paidReceiptStatuses = ["Pagado", "Emitido"];
+    const pendingReceiptStatuses = ["Borrador", "Pendiente", "Enviado", "Vencido"];
+    const monthIncome =
+      events.reduce((sum, event) => sum + currencyToNumber(event.paid), 0) +
+      this.input.receipts
+        .filter((receipt) => paidReceiptStatuses.includes(receipt.status))
+        .reduce((sum, receipt) => sum + receiptTotals(receipt).total, 0);
     const monthExpenses = events.reduce((sum, event) => sum + event.providers.reduce((providerSum, provider) => providerSum + provider.amount - provider.pendingPayment, 0), 0);
     const payable = events.reduce((sum, event) => sum + event.providers.reduce((providerSum, provider) => providerSum + provider.pendingPayment, 0), 0);
-    const receivables = events.reduce((sum, event) => sum + currencyToNumber(event.pendingBalance), 0);
+    const receivables =
+      events.reduce((sum, event) => sum + currencyToNumber(event.pendingBalance), 0) +
+      this.input.receipts
+        .filter((receipt) => pendingReceiptStatuses.includes(receipt.status))
+        .reduce((sum, receipt) => sum + receiptTotals(receipt).total, 0);
     return {
       estimatedProfit: monthIncome - monthExpenses,
       monthExpenses,
@@ -2547,6 +2560,43 @@ class AutomationEngine {
       payable,
       receivables
     };
+  }
+
+  private createFinanceItems(events: EventRecord[]) {
+    const receiptItems = this.input.receipts.map((receipt) => {
+      const total = receiptTotals(receipt).total;
+      return {
+        amount: total,
+        date: receipt.issueDate || receipt.paymentDueDate || "Sin fecha",
+        label: `${receipt.receiptNumber} - ${receipt.client}`,
+        status: receipt.status,
+        type: receipt.status === "Pagado" || receipt.status === "Emitido" ? "Ingreso confirmado" : "Ingreso pendiente"
+      };
+    });
+    const eventItems = events
+      .filter((event) => currencyToNumber(event.pendingBalance) > 0 || currencyToNumber(event.paid) > 0)
+      .map((event) => ({
+        amount: currencyToNumber(event.pendingBalance) > 0 ? currencyToNumber(event.pendingBalance) : currencyToNumber(event.paid),
+        date: event.paymentDeadline || event.date,
+        label: `${event.name} - ${event.clientName}`,
+        status: event.paymentStatus,
+        type: currencyToNumber(event.pendingBalance) > 0 ? "Saldo de evento" : "Pago de evento"
+      }));
+    const providerItems = events.flatMap((event) =>
+      event.providers
+        .filter((provider) => provider.amount > 0 || provider.pendingPayment > 0)
+        .map((provider) => ({
+          amount: provider.pendingPayment > 0 ? provider.pendingPayment : provider.amount,
+          date: event.date,
+          label: `${provider.name} - ${event.name}`,
+          status: provider.pendingPayment > 0 ? "Pendiente" : provider.status,
+          type: "Proveedor"
+        }))
+    );
+
+    return [...receiptItems, ...eventItems, ...providerItems]
+      .filter((item) => item.amount > 0)
+      .sort((a, b) => b.date.localeCompare(a.date));
   }
 
   private createMetrics(events: EventRecord[], alerts: AutomationAlert[], totals: AutomationSnapshot["totals"]): DashboardMetric[] {
@@ -2583,6 +2633,11 @@ class AutomationEngine {
     return [
       ...events.map((event) => ({ date: event.date, label: event.name, type: "Evento" })),
       ...this.input.payments.filter((payment) => payment.paid < payment.amount).map((payment) => ({ date: payment.dueDate, label: payment.concept, type: "Pago" })),
+      ...this.input.receipts.map((receipt) => ({
+        date: receipt.paymentDueDate || receipt.issueDate || "Sin fecha",
+        label: `${receipt.receiptNumber} - ${receipt.client} (${money(receiptTotals(receipt).total)})`,
+        type: receipt.status === "Pagado" || receipt.status === "Emitido" ? "Recibo" : "Pago pendiente"
+      })),
       ...this.input.timeline.filter((item) => item.status !== "Completado").map((item) => ({ date: item.date || item.time, label: item.title, type: item.category })),
       ...this.input.contracts.filter((contract) => contract.status !== "Firmado").map((contract) => ({ date: contract.signatureDeadline || contract.createdAt, label: contract.name, type: "Contrato" }))
     ].slice(0, 12);
@@ -2591,6 +2646,7 @@ class AutomationEngine {
   private createRecentActivity(events: EventRecord[], alerts: AutomationAlert[]) {
     return [
       ...events.flatMap((event) => event.history.map((item) => `${item} · ${event.name}`)),
+      ...this.input.receipts.map((receipt) => `${receipt.issueDate || receipt.paymentDueDate || "Sin fecha"} - Recibo ${receipt.receiptNumber} (${receipt.status}) por ${money(receiptTotals(receipt).total)} a ${receipt.client}.`),
       ...this.input.contracts.map((contract) => `${contract.createdAt} - Contrato ${contract.contractNumber} en estado ${contract.status}.`),
       ...this.input.payments.filter((payment) => payment.paid > 0).map((payment) => `${payment.dueDate} - Pago registrado: ${payment.concept} por ${money(payment.paid)}.`),
       ...alerts.slice(0, 5).map((alert) => `${alert.dueDate} - Alerta ${alert.priority}: ${alert.title}.`)
@@ -2604,16 +2660,16 @@ export default function Home() {
   const [activeModule, setActiveModule] = useState<ModuleId>("dashboard");
   const [globalQuery, setGlobalQuery] = useState("");
 
-  const [clients, setClients] = useState<Client[]>(initialClients);
-  const [events, setEvents] = useState<EventRecord[]>(initialEvents);
-  const [timeline, setTimeline] = useState<TimelineItem[]>(initialTimeline);
-  const [vendors, setVendors] = useState<Vendor[]>(initialVendors);
-  const [quotes, setQuotes] = useState<Quote[]>(initialQuotes);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [events, setEvents] = useState<EventRecord[]>([]);
+  const [timeline, setTimeline] = useState<TimelineItem[]>([]);
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [quotes, setQuotes] = useState<Quote[]>([]);
   const [receipts, setReceipts] = useState<Receipt[]>(initialReceipts);
-  const [contracts, setContracts] = useState<Contract[]>(initialContracts);
+  const [contracts, setContracts] = useState<Contract[]>([]);
   const [documents, setDocuments] = useState<DocumentItem[]>(initialDocuments);
   const [templates, setTemplates] = useState<EmailTemplate[]>(initialTemplates);
-  const [payments, setPayments] = useState<Payment[]>(initialPayments);
+  const [payments, setPayments] = useState<Payment[]>([]);
   const [dismissedAlerts, setDismissedAlerts] = useState<string[]>([]);
   const [clientSyncStatus, setClientSyncStatus] = useState<
     "demo" | "error" | "loading" | "synced"
@@ -2622,8 +2678,8 @@ export default function Home() {
     "demo" | "error" | "loading" | "synced"
   >("demo");
 
-  const [selectedClientId, setSelectedClientId] = useState(initialClients[0].id);
-  const [selectedEventId, setSelectedEventId] = useState(initialEvents[0].id);
+  const [selectedClientId, setSelectedClientId] = useState("");
+  const [selectedEventId, setSelectedEventId] = useState("");
   const [selectedTemplateId, setSelectedTemplateId] = useState(
     initialTemplates[0].id
   );
@@ -2771,6 +2827,8 @@ export default function Home() {
         `Clientes registrados: ${clients.length}`,
         `Cotizaciones: ${quotes.length}`,
         `Contratos: ${contracts.length}`,
+        `Recibos registrados: ${receipts.length}`,
+        `Ingresos por recibos: ${money(receipts.filter((receipt) => receipt.status === "Pagado" || receipt.status === "Emitido").reduce((sum, receipt) => sum + receiptTotals(receipt).total, 0))}`,
         "",
         "Proximos eventos:",
         ...events.map(
@@ -3042,6 +3100,7 @@ export default function Home() {
             onSelectEvent={setSelectedEventId}
             payments={payments}
             quotes={quotes}
+            receipts={receipts}
             timeline={timeline}
           />
         )}
@@ -3256,6 +3315,7 @@ function DashboardView({
   onSelectEvent,
   payments,
   quotes,
+  receipts,
   timeline
 }: Readonly<{
   clients: Client[];
@@ -3267,6 +3327,7 @@ function DashboardView({
   onSelectEvent: (eventId: string) => void;
   payments: Payment[];
   quotes: Quote[];
+  receipts: Receipt[];
   timeline: TimelineItem[];
 }>) {
   const [dashboardQuery, setDashboardQuery] = useState("");
@@ -3274,8 +3335,8 @@ function DashboardView({
   const [statusFilter, setStatusFilter] = useState("Todos");
   const query = dashboardQuery.toLowerCase();
   const automation = useMemo(
-    () => new AutomationEngine({ clients, contracts, events, payments, quotes, timeline }).run(),
-    [clients, contracts, events, payments, quotes, timeline]
+    () => new AutomationEngine({ clients, contracts, events, payments, quotes, receipts, timeline }).run(),
+    [clients, contracts, events, payments, quotes, receipts, timeline]
   );
   const filteredEvents = automation.events.filter((event) => {
     const matchesQuery =
@@ -3289,15 +3350,19 @@ function DashboardView({
   const metrics = automation.metrics;
   const alerts = automation.alerts.filter((alert) => !dismissedAlerts.includes(alert.id));
   const checklistAreas = automation.checklistAreas;
-  const commercialFollowUps = clients.map((client, index) => ({
+  const commercialFollowUps = clients.map((client) => ({
     ...client,
-    lastContact: index === 0 ? "03 jul 2026" : index === 1 ? "01 jul 2026" : "28 jun 2026",
-    nextAction: client.next,
-    probability: index === 0 ? "72%" : index === 1 ? "45%" : "88%",
-    prospectStatus: index === 0 ? "Propuesta enviada" : index === 1 ? "En negociacion" : "Cliente confirmado",
-    followDate: index === 0 ? "06 jul 2026" : index === 1 ? "08 jul 2026" : "10 jul 2026"
+    followDate: client.next || "Sin fecha",
+    lastContact: "Sin registro",
+    nextAction: client.next ? "Dar seguimiento" : "Registrar proxima accion",
+    probability: "Sin dato",
+    prospectStatus: client.status || "Sin estado"
   }));
   const calendarItems = automation.calendarItems;
+  const financeItems = automation.financeItems;
+  const maxFinanceAmount = Math.max(automation.totals.monthIncome, automation.totals.monthExpenses, 1);
+  const incomeWidth = automation.totals.monthIncome > 0 ? Math.max(8, Math.round((automation.totals.monthIncome / maxFinanceAmount) * 100)) : 0;
+  const expenseWidth = automation.totals.monthExpenses > 0 ? Math.max(8, Math.round((automation.totals.monthExpenses / maxFinanceAmount) * 100)) : 0;
   const recentActivity = automation.recentActivity;
 
   return (
@@ -3418,9 +3483,24 @@ function DashboardView({
               <Detail label="Pagos a proveedores" value={money(events.reduce((sum, event) => sum + event.providers.reduce((total, provider) => total + provider.pendingPayment, 0), 0))} />
               <Detail label="Utilidad estimada" value={money(automation.totals.estimatedProfit)} />
               <div className="finance-bars">
-                <span style={{ width: "78%" }}>Ingresos</span>
-                <span style={{ width: "48%" }}>Egresos</span>
+                {incomeWidth > 0 && <span style={{ width: `${incomeWidth}%` }}>Ingresos</span>}
+                {expenseWidth > 0 && <span style={{ width: `${expenseWidth}%` }}>Egresos</span>}
               </div>
+              {financeItems.length > 0 ? (
+                <div className="finance-detail-list">
+                  {financeItems.slice(0, 8).map((item) => (
+                    <article className="finance-detail-row" key={`${item.type}-${item.label}-${item.date}`}>
+                      <div>
+                        <strong>{item.label}</strong>
+                        <span>{item.type} · {item.status} · {item.date}</span>
+                      </div>
+                      <strong>{money(item.amount)}</strong>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty-state">Sin movimientos financieros reales todavia.</div>
+              )}
             </div>
           </Panel>
 
@@ -3433,6 +3513,9 @@ function DashboardView({
                   <p>{item.label}</p>
                 </article>
               ))}
+              {calendarItems.length === 0 && (
+                <div className="empty-state">Sin fechas registradas en eventos, pagos, recibos o contratos.</div>
+              )}
             </div>
           </Panel>
         </div>
@@ -3483,7 +3566,9 @@ function DashboardView({
                   <div className="progress-track"><span style={{ width: `${area.value}%` }} /></div>
                 </div>
               ))}
-              <p className="dashboard-recommendation">Este evento tiene pagos pendientes y proveedores sin confirmar. Se recomienda validar contratos antes de continuar.</p>
+              {alerts.length > 0 && (
+                <p className="dashboard-recommendation">{alerts[0].action}</p>
+              )}
             </div>
           </Panel>
 
@@ -3504,6 +3589,9 @@ function DashboardView({
             <ul className="activity-timeline">
               {recentActivity.map((item) => <li key={item}>{item}</li>)}
             </ul>
+            {recentActivity.length === 0 && (
+              <div className="empty-state">Sin actividad reciente registrada.</div>
+            )}
           </Panel>
         </aside>
       </section>

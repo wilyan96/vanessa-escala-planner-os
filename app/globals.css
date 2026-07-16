@@ -1089,6 +1089,35 @@ h3 {
   background: linear-gradient(90deg, var(--coral), var(--gold));
 }
 
+.finance-detail-list {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+}
+
+.finance-detail-row {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 10px;
+}
+
+.finance-detail-row div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.finance-detail-row span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .calendar-strip {
   display: grid;
   gap: 10px;
