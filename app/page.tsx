@@ -16,6 +16,7 @@ import {
   Handshake,
   Eye,
   EyeOff,
+  FileSpreadsheet,
   LayoutDashboard,
   Lock,
   LogOut,
@@ -32,6 +33,10 @@ import {
   UsersRound,
   X
 } from "lucide-react";
+import {
+  AccountStatement,
+  AccountStatementsView
+} from "@/app/components/account-statements";
 
 type ModuleId =
   | "dashboard"
@@ -41,6 +46,7 @@ type ModuleId =
   | "vendors"
   | "quotes"
   | "receipts"
+  | "statements"
   | "contracts"
   | "documents"
   | "emails";
@@ -332,6 +338,7 @@ const AUTH_STORAGE_KEY = "vanessa-planner-authenticated";
 const CLIENTS_CACHE_KEY = "vanessa-planner-cache-clients";
 const PUBLIC_BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 const RECEIPTS_CACHE_KEY = "vanessa-planner-cache-receipts";
+const STATEMENTS_CACHE_KEY = "vanessa-planner-cache-statements";
 const RECEIPT_START_NUMBER = 250;
 const DATA_CACHE_TTL_MS = 30 * 60 * 1000;
 
@@ -382,6 +389,7 @@ const nav = [
   { id: "vendors", label: "Proveedores", icon: Handshake },
   { id: "quotes", label: "Cotizaciones", icon: CircleDollarSign },
   { id: "receipts", label: "Recibos de Pago", icon: FileSignature },
+  { id: "statements", label: "Estados de Cuenta", icon: FileSpreadsheet },
   { id: "contracts", label: "Contratos y Firmas", icon: FileSignature },
   { id: "documents", label: "Documentos", icon: FolderOpen },
   { id: "emails", label: "Correos", icon: Mail }
@@ -422,6 +430,11 @@ const moduleCopy: Record<ModuleId, { title: string; description: string }> = {
     title: "Recibos de Pago",
     description:
       "Recibos numerados desde REC-250, conectados a eventos y listos para descargar o imprimir."
+  },
+  statements: {
+    title: "Estados de Cuenta",
+    description:
+      "Saldos por cliente y evento, alimentados por recibos reales y listos para descargar en PDF."
   },
   contracts: {
     title: "Contratos y Firmas",
@@ -1490,6 +1503,14 @@ function nextReceiptNumber(receipts: Receipt[]) {
     return match ? Math.max(max, Number(match[1])) : max;
   }, RECEIPT_START_NUMBER - 1);
   return `REC-${maxSequence + 1}`;
+}
+
+function nextAccountStatementNumber(statements: AccountStatement[]) {
+  const maxSequence = statements.reduce((max, statement) => {
+    const match = statement.statementNumber.match(/EDC-(\d+)/);
+    return match ? Math.max(max, Number(match[1])) : max;
+  }, 0);
+  return `EDC-${String(maxSequence + 1).padStart(3, "0")}`;
 }
 
 function receiptItemSubtotal(item: ReceiptItem) {
@@ -2666,6 +2687,7 @@ export default function Home() {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [receipts, setReceipts] = useState<Receipt[]>(initialReceipts);
+  const [accountStatements, setAccountStatements] = useState<AccountStatement[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [documents, setDocuments] = useState<DocumentItem[]>(initialDocuments);
   const [templates, setTemplates] = useState<EmailTemplate[]>(initialTemplates);
@@ -2675,6 +2697,9 @@ export default function Home() {
     "demo" | "error" | "loading" | "synced"
   >("demo");
   const [receiptSyncStatus, setReceiptSyncStatus] = useState<
+    "demo" | "error" | "loading" | "synced"
+  >("demo");
+  const [statementSyncStatus, setStatementSyncStatus] = useState<
     "demo" | "error" | "loading" | "synced"
   >("demo");
 
@@ -2807,6 +2832,40 @@ export default function Home() {
       .catch(() => {
         if (!isCurrent) return;
         setReceiptSyncStatus("error");
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const cachedStatements = readLocalCache<AccountStatement[]>(STATEMENTS_CACHE_KEY);
+    if (cachedStatements?.length) {
+      setAccountStatements(cachedStatements);
+      setStatementSyncStatus("synced");
+      return;
+    }
+
+    let isCurrent = true;
+    setStatementSyncStatus("loading");
+
+    fetch("/api/account-statements")
+      .then((response) => {
+        if (!response.ok) throw new Error("No se pudieron cargar estados de cuenta");
+        return response.json() as Promise<AccountStatement[]>;
+      })
+      .then((databaseStatements) => {
+        if (!isCurrent) return;
+        setAccountStatements(databaseStatements);
+        writeLocalCache(STATEMENTS_CACHE_KEY, databaseStatements);
+        setStatementSyncStatus("synced");
+      })
+      .catch(() => {
+        if (!isCurrent) return;
+        setStatementSyncStatus("error");
       });
 
     return () => {
@@ -3007,6 +3066,71 @@ export default function Home() {
     } catch {
       setReceipts(previousReceipts);
       setReceiptSyncStatus("error");
+    }
+  }
+
+  async function saveAccountStatement(statement: AccountStatement) {
+    const previousStatements = accountStatements;
+    const isEditing = Boolean(statement.id);
+    const normalizedStatement = {
+      ...statement,
+      statementNumber:
+        statement.statementNumber || nextAccountStatementNumber(accountStatements)
+    };
+    const optimisticStatement = isEditing
+      ? normalizedStatement
+      : { ...normalizedStatement, id: makeId("statement") };
+
+    setAccountStatements((current) =>
+      isEditing
+        ? current.map((item) =>
+            item.id === statement.id ? normalizedStatement : item
+          )
+        : [optimisticStatement, ...current]
+    );
+
+    try {
+      const response = await fetch(
+        isEditing
+          ? `/api/account-statements/${statement.id}`
+          : "/api/account-statements",
+        {
+          body: JSON.stringify(normalizedStatement),
+          headers: { "Content-Type": "application/json" },
+          method: isEditing ? "PUT" : "POST"
+        }
+      );
+      if (!response.ok) throw new Error("No se pudo guardar el estado de cuenta");
+      const savedStatement = (await response.json()) as AccountStatement;
+      const nextStatements = isEditing
+        ? previousStatements.map((item) =>
+            item.id === savedStatement.id ? savedStatement : item
+          )
+        : [savedStatement, ...previousStatements];
+      setAccountStatements(nextStatements);
+      writeLocalCache(STATEMENTS_CACHE_KEY, nextStatements);
+      setStatementSyncStatus("synced");
+    } catch {
+      setAccountStatements(previousStatements);
+      setStatementSyncStatus("error");
+    }
+  }
+
+  async function deleteAccountStatement(id: string) {
+    const previousStatements = accountStatements;
+    const nextStatements = previousStatements.filter((item) => item.id !== id);
+    setAccountStatements(nextStatements);
+
+    try {
+      const response = await fetch(`/api/account-statements/${id}`, {
+        method: "DELETE"
+      });
+      if (!response.ok) throw new Error("No se pudo eliminar el estado de cuenta");
+      writeLocalCache(STATEMENTS_CACHE_KEY, nextStatements);
+      setStatementSyncStatus("synced");
+    } catch {
+      setAccountStatements(previousStatements);
+      setStatementSyncStatus("error");
     }
   }
 
@@ -3236,6 +3360,17 @@ export default function Home() {
             onSave={saveReceipt}
             receipts={receipts}
             syncStatus={receiptSyncStatus}
+          />
+        )}
+
+        {activeModule === "statements" && (
+          <AccountStatementsView
+            clients={clients}
+            onDelete={deleteAccountStatement}
+            onSave={saveAccountStatement}
+            receipts={receipts}
+            statements={accountStatements}
+            syncStatus={statementSyncStatus}
           />
         )}
 
