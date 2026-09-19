@@ -164,15 +164,20 @@ function importReceiptSections(
   const totalsByTitle = new Map(
     statement.sections.map((section) => [normalize(section.title), section.total])
   );
+  const existingByTitle = new Map(
+    statement.sections.map((section) => [normalize(section.title), section])
+  );
   const sections = new Map<string, AccountStatementSection>();
 
   matching.forEach((receipt) => {
     receipt.items.forEach((item) => {
       const title = sectionTitleFromDescription(item.description);
       const key = normalize(title);
+      const existing = existingByTitle.get(key);
       const section = sections.get(key) ?? {
-        id: makeStatementId("section"),
-        payments: [],
+        id: existing?.id ?? makeStatementId("section"),
+        payments:
+          existing?.payments.filter((payment) => !payment.receiptNumber.trim()) ?? [],
         title,
         total: totalsByTitle.get(key) ?? 0
       };
@@ -189,7 +194,12 @@ function importReceiptSections(
 
   const imported = [...sections.values()];
   statement.sections.forEach((section) => {
-    if (!sections.has(normalize(section.title))) imported.push({ ...section, payments: [] });
+    if (!sections.has(normalize(section.title))) {
+      imported.push({
+        ...section,
+        payments: section.payments.filter((payment) => !payment.receiptNumber.trim())
+      });
+    }
   });
   return {
     count: matching.length,
@@ -513,6 +523,17 @@ export function AccountStatementsView({
 
   const selected = statements.find((statement) => statement.id === selectedId) ?? filtered[0];
   const preview = viewMode === "form" && (draft.client || draft.id) ? draft : selected;
+  const availableEvents = useMemo(
+    () => [
+      ...new Set(
+        receipts
+          .filter((receipt) => normalize(receipt.client) === normalize(draft.client))
+          .map((receipt) => receipt.eventName)
+          .filter(Boolean)
+      )
+    ],
+    [draft.client, receipts]
+  );
 
   useEffect(() => {
     if (!selectedId && statements[0]) setSelectedId(statements[0].id);
@@ -528,8 +549,16 @@ export function AccountStatementsView({
   }
 
   function edit(statement: AccountStatement) {
-    setDraft(statement);
-    setImportMessage("");
+    const result = importReceiptSections(statement, receipts);
+    setDraft({
+      ...statement,
+      sections: result.count > 0 ? result.sections : statement.sections
+    });
+    setImportMessage(
+      result.count > 0
+        ? `${result.count} recibo${result.count === 1 ? "" : "s"} actualizado${result.count === 1 ? "" : "s"} automaticamente.`
+        : "No hay recibos pagados o emitidos nuevos para este cliente y evento."
+    );
     setViewMode("form");
   }
 
@@ -547,12 +576,59 @@ export function AccountStatementsView({
   function chooseClient(name: string) {
     const client = clients.find((item) => normalize(item.name) === normalize(name));
     const receipt = receipts.find((item) => normalize(item.client) === normalize(name));
-    setDraft((current) => ({
-      ...current,
+    const nextStatement = {
+      ...draft,
       client: name,
-      clientEmail: client?.email || current.clientEmail,
-      eventName: receipt?.eventName || client?.event || current.eventName
-    }));
+      clientEmail: client?.email || draft.clientEmail,
+      eventName: receipt?.eventName || client?.event || draft.eventName
+    };
+    const result = importReceiptSections(nextStatement, receipts);
+
+    setDraft({
+      ...nextStatement,
+      sections:
+        result.count > 0
+          ? result.sections
+          : client || receipt
+            ? nextStatement.sections
+            : nextStatement.sections.map((section) => ({
+                ...section,
+                payments: section.payments.filter(
+                  (payment) => !payment.receiptNumber.trim()
+                )
+              }))
+    });
+    if (client || receipt) {
+      setImportMessage(
+        result.count > 0
+          ? `${result.count} recibo${result.count === 1 ? "" : "s"} cargado${result.count === 1 ? "" : "s"} automaticamente.`
+          : "Cliente seleccionado, pero todavia no tiene recibos pagados o emitidos."
+      );
+    }
+  }
+
+  function chooseEvent(eventName: string) {
+    const nextStatement = { ...draft, eventName };
+    const result = importReceiptSections(nextStatement, receipts);
+    setDraft({
+      ...nextStatement,
+      sections:
+        result.count > 0
+          ? result.sections
+          : nextStatement.sections.map((section) => ({
+              ...section,
+              payments: section.payments.filter(
+                (payment) => !payment.receiptNumber.trim()
+              )
+            }))
+    });
+    if (draft.client.trim()) {
+      setImportMessage(
+        result.count > 0
+          ? `${result.count} recibo${result.count === 1 ? "" : "s"} vinculado${result.count === 1 ? "" : "s"} a este evento.`
+          : "No hay recibos pagados o emitidos para este evento."
+      );
+    }
   }
 
   function loadReceipts() {
@@ -718,14 +794,15 @@ export function AccountStatementsView({
               <label className="field"><span>Cliente</span><input className="input" list="statement-clients" onChange={(event) => chooseClient(event.target.value)} required value={draft.client} /></label>
               <datalist id="statement-clients">{[...new Set([...clients.map((client) => client.name), ...receipts.map((receipt) => receipt.client)])].map((name) => <option key={name} value={name} />)}</datalist>
               <label className="field"><span>Correo</span><input className="input" onChange={(event) => setDraft((current) => ({ ...current, clientEmail: event.target.value }))} type="email" value={draft.clientEmail} /></label>
-              <label className="field"><span>Evento</span><input className="input" onChange={(event) => setDraft((current) => ({ ...current, eventName: event.target.value }))} value={draft.eventName} /></label>
+              <label className="field"><span>Evento</span><input className="input" list="statement-events" onChange={(event) => chooseEvent(event.target.value)} value={draft.eventName} /></label>
+              <datalist id="statement-events">{availableEvents.map((eventName) => <option key={eventName} value={eventName} />)}</datalist>
               <label className="field"><span>Fecha</span><input className="input" onChange={(event) => setDraft((current) => ({ ...current, issueDate: event.target.value }))} type="date" value={draft.issueDate} /></label>
               <label className="field"><span>Estado</span><select className="input" onChange={(event) => setDraft((current) => ({ ...current, status: event.target.value }))} value={draft.status}>{["Borrador", "Actualizado", "Enviado", "Cerrado"].map((status) => <option key={status}>{status}</option>)}</select></label>
             </div>
 
             <div className="statement-import-bar">
-              <div><strong>Pagos desde recibos</strong><span>Importa automaticamente los abonos pagados o emitidos del cliente.</span></div>
-              <button className="button" onClick={loadReceipts} type="button"><RefreshCw size={17} aria-hidden="true" />Cargar recibos</button>
+              <div><strong>Pagos desde recibos</strong><span>Se cargan al seleccionar el cliente. Usa el boton para comprobar recibos nuevos.</span></div>
+              <button className="button" onClick={loadReceipts} type="button"><RefreshCw size={17} aria-hidden="true" />Actualizar desde recibos</button>
             </div>
             {importMessage && <p className="statement-import-message">{importMessage}</p>}
 
