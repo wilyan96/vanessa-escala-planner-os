@@ -144,6 +144,25 @@ function statementTotals(statement: AccountStatement) {
   return { paid, pending: Math.max(total - paid, 0), total };
 }
 
+function paymentPercent(total: number, paid: number) {
+  if (total <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((paid / total) * 100)));
+}
+
+function paymentPercentLabel(total: number, paid: number) {
+  return total <= 0 && paid > 0 ? "Por definir" : `${paymentPercent(total, paid)}%`;
+}
+
+function balanceLabel(total: number, paid: number) {
+  return total <= 0 && paid > 0 ? "Por definir" : money(Math.max(total - paid, 0));
+}
+
+function hasUndefinedBalance(statement: AccountStatement) {
+  return statement.sections.some(
+    (section) => section.total <= 0 && sectionPaid(section) > 0
+  );
+}
+
 function sectionTitleFromDescription(description: string) {
   const value = normalize(description);
   if (value.includes("decor")) return "Decoración";
@@ -357,7 +376,6 @@ async function createStatementPdf(statement: AccountStatement) {
   sections.forEach((section, sectionIndex) => {
     const x = 80 + sectionIndex * (sectionWidth + gap);
     const paid = sectionPaid(section);
-    const pending = Math.max(section.total - paid, 0);
     context.strokeStyle = "#d6d3cd";
     context.lineWidth = 2;
     context.strokeRect(x, 330, sectionWidth, 500);
@@ -385,7 +403,7 @@ async function createStatementPdf(statement: AccountStatement) {
       context.fillRect(x, rowY, sectionWidth, 52);
       context.fillStyle = "#333333";
       context.font = "17px Arial";
-      context.fillText(payment.date || "-", x + 16, rowY + 32);
+      context.fillText(displayDate(payment.date), x + 16, rowY + 32);
       const description = `${payment.description}${payment.receiptNumber ? ` (${payment.receiptNumber})` : ""}`;
       context.fillText(description.slice(0, 32), x + 145, rowY + 32);
       context.textAlign = "right";
@@ -402,7 +420,7 @@ async function createStatementPdf(statement: AccountStatement) {
     context.fillText("Saldo pendiente", x + 16, 815);
     context.textAlign = "right";
     context.fillText(money(paid), x + sectionWidth - 16, 771);
-    context.fillText(money(pending), x + sectionWidth - 16, 815);
+    context.fillText(balanceLabel(section.total, paid), x + sectionWidth - 16, 815);
     context.textAlign = "left";
   });
 
@@ -431,7 +449,7 @@ async function createStatementPdf(statement: AccountStatement) {
     context.textAlign = "right";
     context.fillText(money(section.total), 1120, y + 28);
     context.fillText(money(paid), 1330, y + 28);
-    context.fillText(money(Math.max(section.total - paid, 0)), 1550, y + 28);
+    context.fillText(balanceLabel(section.total, paid), 1550, y + 28);
     context.textAlign = "left";
   });
 
@@ -444,7 +462,11 @@ async function createStatementPdf(statement: AccountStatement) {
   context.textAlign = "right";
   context.fillStyle = "#d9ad3b";
   context.font = "bold 36px Arial";
-  context.fillText(money(totals.pending), 1540, summaryY + 49);
+  context.fillText(
+    hasUndefinedBalance(statement) ? "Por definir" : money(totals.pending),
+    1540,
+    summaryY + 49
+  );
   context.textAlign = "left";
 
   context.fillStyle = "#6b7280";
@@ -723,6 +745,7 @@ export function AccountStatementsView({
               <div><span>Registrados</span><strong>{statements.length}</strong></div>
               <div><span>Saldo pendiente visible</span><strong>{money(filtered.reduce((sum, item) => sum + statementTotals(item).pending, 0))}</strong></div>
               <div><span>Actualizados</span><strong>{filtered.filter((item) => item.status === "Actualizado").length}</strong></div>
+              <div><span>Saldo por definir</span><strong>{filtered.filter(hasUndefinedBalance).length}</strong></div>
             </div>
             <div className="statement-toolbar">
               <label className="receipt-search-control">
@@ -747,7 +770,7 @@ export function AccountStatementsView({
               <table className="table">
                 <thead>
                   <tr>
-                    <th>No.</th><th>Cliente</th><th>Evento</th><th>Fecha</th><th>Total</th><th>Abonado</th><th>Saldo</th><th>Estado</th><th>Acciones</th>
+                    <th>No.</th><th>Cliente</th><th>Evento</th><th>Fecha</th><th>Total</th><th>Abonado</th><th>Pagado</th><th>Saldo</th><th>Estado</th><th>Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -761,7 +784,8 @@ export function AccountStatementsView({
                         <td>{displayDate(statement.issueDate)}</td>
                         <td>{money(rowTotals.total)}</td>
                         <td>{money(rowTotals.paid)}</td>
-                        <td><strong>{money(rowTotals.pending)}</strong></td>
+                        <td><strong>{paymentPercentLabel(rowTotals.total, rowTotals.paid)}</strong></td>
+                        <td><strong>{hasUndefinedBalance(statement) ? "Por definir" : money(rowTotals.pending)}</strong></td>
                         <td><span className={`status ${statement.status === "Cerrado" ? "success" : statement.status === "Borrador" ? "warning" : "blue"}`}>{statement.status}</span></td>
                         <td>
                           <div className="statement-actions">
@@ -832,15 +856,18 @@ export function AccountStatementsView({
                   <div className="statement-section-footer">
                     <button className="button" onClick={() => updateSection(section.id, { payments: [...section.payments, { amount: 0, date: "", description: "Abono", id: makeStatementId("payment"), receiptNumber: "" }] })} type="button"><Plus size={16} aria-hidden="true" />Agregar abono</button>
                     <span>Abonado: <strong>{money(sectionPaid(section))}</strong></span>
-                    <span>Saldo: <strong>{money(Math.max(section.total - sectionPaid(section), 0))}</strong></span>
+                    <span>Pagado: <strong>{paymentPercentLabel(section.total, sectionPaid(section))}</strong></span>
+                    <span>Saldo: <strong>{balanceLabel(section.total, sectionPaid(section))}</strong></span>
                   </div>
+                  <div className="statement-payment-progress"><span style={{ width: `${paymentPercent(section.total, sectionPaid(section))}%` }} /></div>
                 </article>
               ))}
             </div>
             {draft.sections.length < 3 && <button className="button" onClick={() => setDraft((current) => ({ ...current, sections: [...current.sections, { id: makeStatementId("section"), payments: [], title: "Otro servicio", total: 0 }] }))} type="button"><Plus size={16} aria-hidden="true" />Agregar servicio</button>}
 
             <label className="field statement-notes"><span>Nota</span><textarea className="input textarea" onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))} value={draft.notes} /></label>
-            <div className="statement-form-total"><span>Total contratado <strong>{money(statementTotals(draft).total)}</strong></span><span>Total abonado <strong>{money(statementTotals(draft).paid)}</strong></span><span>Saldo pendiente <strong>{money(statementTotals(draft).pending)}</strong></span></div>
+            {hasUndefinedBalance(draft) && <p className="statement-balance-warning">Ingresa el total contratado de cada servicio para calcular correctamente el saldo pendiente.</p>}
+            <div className="statement-form-total"><span>Total contratado <strong>{money(statementTotals(draft).total)}</strong></span><span>Total abonado <strong>{money(statementTotals(draft).paid)}</strong></span><span>Pago realizado <strong>{paymentPercentLabel(statementTotals(draft).total, statementTotals(draft).paid)}</strong></span><span>Saldo pendiente <strong>{hasUndefinedBalance(draft) ? "Por definir" : money(statementTotals(draft).pending)}</strong></span></div>
             <div className="form-actions">
               <button className="button primary" type="submit"><Save size={17} aria-hidden="true" />Guardar estado</button>
               <button className="button" onClick={() => setDraft(createBlankStatement())} type="button"><X size={17} aria-hidden="true" />Limpiar</button>
@@ -864,11 +891,11 @@ export function AccountStatementsView({
             <div className={`statement-paper-sections count-${Math.min(preview.sections.length, 3)}`}>
               {preview.sections.slice(0, 3).map((section, index) => {
                 const paid = sectionPaid(section);
-                return <section className="statement-paper-section" key={section.id}><h3>{index + 1}. {section.title}</h3><p>Costo total: <strong>{money(section.total)}</strong></p><table><thead><tr><th>Fecha</th><th>Concepto / Recibo</th><th>Abono</th></tr></thead><tbody>{compactPayments(section.payments).map((payment) => <tr key={payment.id}><td>{payment.date || "-"}</td><td>{payment.description}{payment.receiptNumber ? ` (${payment.receiptNumber})` : ""}</td><td>{money(payment.amount)}</td></tr>)}</tbody><tfoot><tr><th colSpan={2}>Total abonado</th><th>{money(paid)}</th></tr><tr><th colSpan={2}>Saldo pendiente</th><th>{money(Math.max(section.total - paid, 0))}</th></tr></tfoot></table></section>;
+                return <section className="statement-paper-section" key={section.id}><h3>{index + 1}. {section.title}</h3><p>Costo total: <strong>{money(section.total)}</strong> · Pagado: <strong>{paymentPercentLabel(section.total, paid)}</strong></p><table><thead><tr><th>Fecha</th><th>Concepto / Recibo</th><th>Abono</th></tr></thead><tbody>{compactPayments(section.payments).map((payment) => <tr key={payment.id}><td>{displayDate(payment.date)}</td><td>{payment.description}{payment.receiptNumber ? ` (${payment.receiptNumber})` : ""}</td><td>{money(payment.amount)}</td></tr>)}</tbody><tfoot><tr><th colSpan={2}>Total abonado</th><th>{money(paid)}</th></tr><tr><th colSpan={2}>Saldo pendiente</th><th>{balanceLabel(section.total, paid)}</th></tr></tfoot></table></section>;
               })}
             </div>
-            <section className="statement-paper-summary"><h3>Resumen general</h3><table><thead><tr><th>Concepto</th><th>Contratado</th><th>Abonado</th><th>Pendiente</th></tr></thead><tbody>{preview.sections.map((section) => { const paid = sectionPaid(section); return <tr key={section.id}><td>{section.title}</td><td>{money(section.total)}</td><td>{money(paid)}</td><td>{money(Math.max(section.total - paid, 0))}</td></tr>; })}</tbody></table></section>
-            <div className="statement-paper-balance"><span>Saldo total pendiente a la fecha</span><strong>{money(totals?.pending ?? 0)}</strong></div>
+            <section className="statement-paper-summary"><h3>Resumen general</h3><table><thead><tr><th>Concepto</th><th>Contratado</th><th>Abonado</th><th>Pagado</th><th>Pendiente</th></tr></thead><tbody>{preview.sections.map((section) => { const paid = sectionPaid(section); return <tr key={section.id}><td>{section.title}</td><td>{money(section.total)}</td><td>{money(paid)}</td><td>{paymentPercentLabel(section.total, paid)}</td><td>{balanceLabel(section.total, paid)}</td></tr>; })}</tbody></table></section>
+            <div className="statement-paper-balance"><span>Saldo total pendiente a la fecha</span><strong>{hasUndefinedBalance(preview) ? "Por definir" : money(totals?.pending ?? 0)}</strong></div>
             <footer><span>{preview.notes || "Estado de cuenta generado con pagos registrados en Vanessa Escala Planner OS."}</span><span>+507 6371-2318 | vanessaescalaplanner@gmail.com</span></footer>
           </article>
         </section>

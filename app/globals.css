@@ -942,6 +942,44 @@ h3 {
   height: 100%;
 }
 
+.provider-total-progress,
+.provider-card-progress {
+  display: grid;
+  gap: 8px;
+}
+
+.provider-total-progress {
+  margin: 0 0 18px;
+}
+
+.provider-total-progress > div:first-child,
+.provider-card-progress > div:first-child {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.provider-card-progress {
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.provider-form-summary {
+  align-items: center;
+  background: #f7f7f5;
+  border: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+  justify-content: space-between;
+  padding: 14px;
+}
+
+.provider-form-summary .progress-track {
+  flex: 0 0 100%;
+}
+
 .timeline {
   display: grid;
   gap: 12px;
@@ -2227,10 +2265,14 @@ h3 {
 .statement-form-head {
   display: grid;
   gap: 10px;
+}
+
+.statement-form-head {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .statement-summary-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   margin-bottom: 12px;
 }
 
@@ -2253,6 +2295,30 @@ h3 {
 
 .statement-summary-grid strong {
   font-size: 21px;
+}
+
+.statement-payment-progress {
+  background: #e7e7e4;
+  border-radius: 999px;
+  height: 8px;
+  margin-top: 10px;
+  overflow: hidden;
+}
+
+.statement-payment-progress span {
+  background: linear-gradient(90deg, var(--gold), var(--blue));
+  display: block;
+  height: 100%;
+}
+
+.statement-balance-warning {
+  background: #fff7e8;
+  border: 1px solid #ead4a2;
+  color: #765514;
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0;
+  padding: 12px 14px;
 }
 
 .statement-toolbar {

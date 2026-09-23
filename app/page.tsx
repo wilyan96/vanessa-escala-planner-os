@@ -176,6 +176,8 @@ type Vendor = {
   phone: string;
   email: string;
   rate: string;
+  contractedAmount: number;
+  paidAmount: number;
   status: string;
 };
 
@@ -340,6 +342,7 @@ const CLIENTS_CACHE_KEY = "vanessa-planner-cache-clients";
 const PUBLIC_BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 const RECEIPTS_CACHE_KEY = "vanessa-planner-cache-receipts";
 const STATEMENTS_CACHE_KEY = "vanessa-planner-cache-statements";
+const VENDORS_CACHE_KEY = "vanessa-planner-cache-vendors";
 const RECEIPT_START_NUMBER = 250;
 const DATA_CACHE_TTL_MS = 30 * 60 * 1000;
 
@@ -989,6 +992,8 @@ const initialVendors: Vendor[] = [
     phone: "+507 6000-1212",
     email: "hola@bloom.test",
     rate: "$3,500",
+    contractedAmount: 3500,
+    paidAmount: 2000,
     status: "Recomendado"
   },
   {
@@ -999,6 +1004,8 @@ const initialVendors: Vendor[] = [
     phone: "+507 6000-3434",
     email: "ventas@aura.test",
     rate: "$48 por persona",
+    contractedAmount: 4560,
+    paidAmount: 2280,
     status: "Activo"
   },
   {
@@ -1009,6 +1016,8 @@ const initialVendors: Vendor[] = [
     phone: "+507 6000-5656",
     email: "studio@luzviva.test",
     rate: "$2,800",
+    contractedAmount: 2800,
+    paidAmount: 1400,
     status: "Pendiente"
   }
 ];
@@ -1327,6 +1336,8 @@ const blankVendor: Vendor = {
   phone: "",
   email: "",
   rate: "$0",
+  contractedAmount: 0,
+  paidAmount: 0,
   status: "Activo"
 };
 
@@ -2074,6 +2085,11 @@ function currencyToNumber(value: string) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function paidPercentage(total: number, paid: number) {
+  if (total <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((paid / total) * 100)));
+}
+
 async function sha256(value: string) {
   const bytes = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -2763,6 +2779,9 @@ export default function Home() {
   const [statementSyncStatus, setStatementSyncStatus] = useState<
     "demo" | "error" | "loading" | "synced"
   >("demo");
+  const [vendorSyncStatus, setVendorSyncStatus] = useState<
+    "demo" | "error" | "loading" | "synced"
+  >("demo");
 
   const [selectedClientId, setSelectedClientId] = useState("");
   const [selectedEventId, setSelectedEventId] = useState("");
@@ -2859,6 +2878,40 @@ export default function Home() {
       .catch(() => {
         if (!isCurrent) return;
         setClientSyncStatus("error");
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const cachedVendors = readLocalCache<Vendor[]>(VENDORS_CACHE_KEY);
+    if (cachedVendors?.length) {
+      setVendors(cachedVendors);
+      setVendorSyncStatus("synced");
+      return;
+    }
+
+    let isCurrent = true;
+    setVendorSyncStatus("loading");
+
+    fetch("/api/vendors")
+      .then((response) => {
+        if (!response.ok) throw new Error("No se pudieron cargar proveedores");
+        return response.json() as Promise<Vendor[]>;
+      })
+      .then((databaseVendors) => {
+        if (!isCurrent) return;
+        setVendors(databaseVendors);
+        writeLocalCache(VENDORS_CACHE_KEY, databaseVendors);
+        setVendorSyncStatus("synced");
+      })
+      .catch(() => {
+        if (!isCurrent) return;
+        setVendorSyncStatus("error");
       });
 
     return () => {
@@ -3042,6 +3095,56 @@ export default function Home() {
     } catch {
       setClients(previousClients);
       setClientSyncStatus("error");
+    }
+  }
+
+  async function saveVendor(vendor: Vendor) {
+    const previousVendors = vendors;
+    const isEditing = Boolean(vendor.id);
+    const optimisticVendor = isEditing ? vendor : { ...vendor, id: makeId("vd") };
+
+    setVendors((current) =>
+      isEditing
+        ? current.map((item) => (item.id === vendor.id ? vendor : item))
+        : [...current, optimisticVendor]
+    );
+
+    try {
+      const response = await fetch(
+        isEditing ? `/api/vendors/${vendor.id}` : "/api/vendors",
+        {
+          body: JSON.stringify(vendor),
+          headers: { "Content-Type": "application/json" },
+          method: isEditing ? "PUT" : "POST"
+        }
+      );
+      if (!response.ok) throw new Error("No se pudo guardar el proveedor");
+      const savedVendor = (await response.json()) as Vendor;
+      const nextVendors = isEditing
+        ? previousVendors.map((item) => (item.id === savedVendor.id ? savedVendor : item))
+        : [...previousVendors, savedVendor];
+      setVendors(nextVendors);
+      writeLocalCache(VENDORS_CACHE_KEY, nextVendors);
+      setVendorSyncStatus("synced");
+    } catch {
+      setVendors(previousVendors);
+      setVendorSyncStatus("error");
+    }
+  }
+
+  async function deleteVendor(id: string) {
+    const previousVendors = vendors;
+    const nextVendors = previousVendors.filter((item) => item.id !== id);
+    setVendors(nextVendors);
+
+    try {
+      const response = await fetch(`/api/vendors/${id}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("No se pudo eliminar el proveedor");
+      writeLocalCache(VENDORS_CACHE_KEY, nextVendors);
+      setVendorSyncStatus("synced");
+    } catch {
+      setVendors(previousVendors);
+      setVendorSyncStatus("error");
     }
   }
 
@@ -3358,18 +3461,11 @@ export default function Home() {
         {activeModule === "vendors" && (
           <VendorsView
             filteredVendors={filteredVendors}
-            onDelete={(id) =>
-              setVendors((current) => current.filter((item) => item.id !== id))
-            }
-            onSave={(vendor) => {
-              setVendors((current) =>
-                vendor.id
-                  ? current.map((item) => (item.id === vendor.id ? vendor : item))
-                  : [...current, { ...vendor, id: makeId("vd") }]
-              );
-            }}
+            onDelete={deleteVendor}
+            onSave={saveVendor}
             selectedEvent={selectedEvent}
             setVendorFilter={setVendorFilter}
+            syncStatus={vendorSyncStatus}
             vendorFilter={vendorFilter}
           />
         )}
@@ -4424,6 +4520,7 @@ function VendorsView({
   onSave,
   selectedEvent,
   setVendorFilter,
+  syncStatus,
   vendorFilter
 }: Readonly<{
   filteredVendors: Vendor[];
@@ -4431,9 +4528,24 @@ function VendorsView({
   onSave: (vendor: Vendor) => void;
   selectedEvent?: EventRecord;
   setVendorFilter: (value: string) => void;
+  syncStatus: "demo" | "error" | "loading" | "synced";
   vendorFilter: string;
 }>) {
   const [draft, setDraft] = useState<Vendor>(blankVendor);
+  const totalContracted = filteredVendors.reduce(
+    (sum, vendor) => sum + Number(vendor.contractedAmount || 0),
+    0
+  );
+  const totalPaid = filteredVendors.reduce(
+    (sum, vendor) => sum + Number(vendor.paidAmount || 0),
+    0
+  );
+  const totalPending = filteredVendors.reduce(
+    (sum, vendor) =>
+      sum + Math.max(Number(vendor.contractedAmount || 0) - Number(vendor.paidAmount || 0), 0),
+    0
+  );
+  const totalProgress = paidPercentage(totalContracted, totalPaid);
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -4460,56 +4572,96 @@ function VendorsView({
           </select>
         }
       >
+        <div className="sync-banner">
+          <Status
+            label={
+              syncStatus === "synced"
+                ? "Proveedores conectados a Prisma"
+                : syncStatus === "loading"
+                  ? "Sincronizando proveedores"
+                  : syncStatus === "error"
+                    ? "Error al guardar proveedores"
+                    : "Preparando proveedores"
+            }
+            tone={syncStatus === "synced" ? "success" : syncStatus === "error" ? "warning" : "neutral"}
+          />
+          <span>Los montos contratados y pagos quedan guardados en la base de datos.</span>
+        </div>
+        <div className="statement-summary-grid provider-summary-grid">
+          <div><span>Total contratado</span><strong>{money(totalContracted)}</strong></div>
+          <div><span>Total pagado</span><strong>{money(totalPaid)}</strong></div>
+          <div><span>Saldo pendiente</span><strong>{money(totalPending)}</strong></div>
+          <div><span>Avance de pagos</span><strong>{totalProgress}%</strong></div>
+        </div>
+        <div className="provider-total-progress">
+          <div><span>Progreso general de pagos</span><strong>{totalProgress}%</strong></div>
+          <div className="progress-track"><span style={{ width: `${totalProgress}%` }} /></div>
+        </div>
         <div className="card-grid">
-          {filteredVendors.map((vendor) => (
-            <article className="card" key={vendor.id}>
-              <div className="card-header">
-                <div>
-                  <h3>{vendor.name}</h3>
-                  <span className="muted">{vendor.category}</span>
+          {filteredVendors.map((vendor) => {
+            const pending = Math.max(vendor.contractedAmount - vendor.paidAmount, 0);
+            const progress = paidPercentage(vendor.contractedAmount, vendor.paidAmount);
+            return (
+              <article className="card" key={vendor.id}>
+                <div className="card-header">
+                  <div>
+                    <h3>{vendor.name}</h3>
+                    <span className="muted">{vendor.category}</span>
+                  </div>
+                  <Status label={vendor.status} tone="blue" />
                 </div>
-                <Status label={vendor.status} tone="blue" />
-              </div>
-              <p className="muted">
-                {vendor.contact} · {vendor.phone}
-              </p>
-              <Detail label="Correo" value={vendor.email} />
-              <Detail label="Tarifa" value={vendor.rate} />
-              <div className="row-actions">
-                <button className="button" type="button">
-                  Asignar a {selectedEvent?.type ?? "evento"}
-                </button>
-                <button
-                  className="icon-button"
-                  onClick={() => setDraft(vendor)}
-                  title="Editar"
-                  type="button"
-                >
-                  <Edit3 size={16} aria-hidden="true" />
-                </button>
-                <PdfButton
-                  filename={`${vendor.name}.pdf`}
-                  lines={[
-                    `Categoria: ${vendor.category}`,
-                    `Contacto: ${vendor.contact}`,
-                    `Telefono: ${vendor.phone}`,
-                    `Correo: ${vendor.email}`,
-                    `Tarifa: ${vendor.rate}`,
-                    `Estado: ${vendor.status}`
-                  ]}
-                  title={`Proveedor - ${vendor.name}`}
-                />
-                <button
-                  className="icon-button danger"
-                  onClick={() => onDelete(vendor.id)}
-                  title="Eliminar"
-                  type="button"
-                >
-                  <Trash2 size={16} aria-hidden="true" />
-                </button>
-              </div>
-            </article>
-          ))}
+                <p className="muted">
+                  {vendor.contact} · {vendor.phone}
+                </p>
+                <Detail label="Correo" value={vendor.email} />
+                <Detail label="Tarifa" value={vendor.rate} />
+                <Detail label="Monto contratado" value={money(vendor.contractedAmount)} />
+                <Detail label="Monto pagado" value={money(vendor.paidAmount)} />
+                <Detail label="Saldo pendiente" value={money(pending)} />
+                <div className="provider-card-progress">
+                  <div><span>Pago realizado</span><strong>{progress}%</strong></div>
+                  <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
+                </div>
+                <div className="row-actions">
+                  <button className="button" type="button">
+                    Asignar a {selectedEvent?.type ?? "evento"}
+                  </button>
+                  <button
+                    className="icon-button"
+                    onClick={() => setDraft(vendor)}
+                    title="Editar"
+                    type="button"
+                  >
+                    <Edit3 size={16} aria-hidden="true" />
+                  </button>
+                  <PdfButton
+                    filename={`${vendor.name}.pdf`}
+                    lines={[
+                      `Categoria: ${vendor.category}`,
+                      `Contacto: ${vendor.contact}`,
+                      `Telefono: ${vendor.phone}`,
+                      `Correo: ${vendor.email}`,
+                      `Tarifa: ${vendor.rate}`,
+                      `Monto contratado: ${money(vendor.contractedAmount)}`,
+                      `Monto pagado: ${money(vendor.paidAmount)}`,
+                      `Saldo pendiente: ${money(pending)}`,
+                      `Porcentaje pagado: ${progress}%`,
+                      `Estado: ${vendor.status}`
+                    ]}
+                    title={`Proveedor - ${vendor.name}`}
+                  />
+                  <button
+                    className="icon-button danger"
+                    onClick={() => onDelete(vendor.id)}
+                    title="Eliminar"
+                    type="button"
+                  >
+                    <Trash2 size={16} aria-hidden="true" />
+                  </button>
+                </div>
+              </article>
+            );
+          })}
         </div>
       </Panel>
 
@@ -5937,6 +6089,8 @@ function EventForm({ draft, onCancel, onChange, onSubmit }: FormProps<EventRecor
 }
 
 function VendorForm({ draft, onCancel, onChange, onSubmit }: FormProps<Vendor>) {
+  const pending = Math.max(draft.contractedAmount - draft.paidAmount, 0);
+  const progress = paidPercentage(draft.contractedAmount, draft.paidAmount);
   return (
     <form className="form-grid" onSubmit={onSubmit}>
       <Input label="Proveedor" value={draft.name} onChange={(name) => onChange({ ...draft, name })} />
@@ -5945,7 +6099,19 @@ function VendorForm({ draft, onCancel, onChange, onSubmit }: FormProps<Vendor>) 
       <Input label="Telefono" value={draft.phone} onChange={(phone) => onChange({ ...draft, phone })} />
       <Input label="Correo" value={draft.email} onChange={(email) => onChange({ ...draft, email })} />
       <Input label="Tarifa" value={draft.rate} onChange={(rate) => onChange({ ...draft, rate })} />
-      <Input label="Estado" value={draft.status} onChange={(status) => onChange({ ...draft, status })} />
+      <Input label="Monto contratado" type="number" value={String(draft.contractedAmount)} onChange={(contractedAmount) => onChange({ ...draft, contractedAmount: Number(contractedAmount) })} />
+      <Input label="Monto pagado" type="number" value={String(draft.paidAmount)} onChange={(paidAmount) => onChange({ ...draft, paidAmount: Number(paidAmount) })} />
+      <label className="field">
+        <span>Estado</span>
+        <select className="input" onChange={(event) => onChange({ ...draft, status: event.target.value })} value={draft.status}>
+          {["Activo", "Recomendado", "Pendiente", "No recomendado"].map((status) => <option key={status}>{status}</option>)}
+        </select>
+      </label>
+      <div className="provider-form-summary full">
+        <span>Saldo pendiente <strong>{money(pending)}</strong></span>
+        <span>Pago realizado <strong>{progress}%</strong></span>
+        <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
+      </div>
       <FormActions isEditing={Boolean(draft.id)} onCancel={onCancel} />
     </form>
   );
