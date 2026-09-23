@@ -55,6 +55,7 @@ type StatusTone = "success" | "warning" | "danger" | "neutral" | "blue";
 
 type Client = {
   id: string;
+  clientNumber: string;
   name: string;
   phone: string;
   email: string;
@@ -648,6 +649,7 @@ function moduleFromHash(): ModuleId {
 const initialClients: Client[] = [
   {
     id: "cl-1",
+    clientNumber: "CLI-CL1",
     name: "Mariana Lopez",
     phone: "+507 6123-4455",
     email: "mariana@example.com",
@@ -661,6 +663,7 @@ const initialClients: Client[] = [
   },
   {
     id: "cl-2",
+    clientNumber: "CLI-CL2",
     name: "Grupo Altair",
     phone: "+507 6677-1122",
     email: "eventos@altair.test",
@@ -674,6 +677,7 @@ const initialClients: Client[] = [
   },
   {
     id: "cl-3",
+    clientNumber: "CLI-CL3",
     name: "Familia Rivera",
     phone: "+507 6988-2244",
     email: "rivera@example.com",
@@ -1285,6 +1289,7 @@ const initialTemplates: EmailTemplate[] = [
 
 const blankClient: Client = {
   id: "",
+  clientNumber: "",
   name: "",
   phone: "",
   email: "",
@@ -1465,6 +1470,20 @@ function makeId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random()
     .toString(36)
     .slice(2, 7)}`;
+}
+
+function normalizeText(value = "") {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function clientReference(client: Pick<Client, "clientNumber" | "id">) {
+  if (client.clientNumber?.trim()) return client.clientNumber;
+  const suffix = client.id.replace(/[^a-z0-9]/gi, "").slice(-8).toUpperCase();
+  return suffix ? `CLI-${suffix}` : "Se genera al guardar";
 }
 
 function nextQuoteNumber(quotes: Quote[]) {
@@ -2729,7 +2748,7 @@ export default function Home() {
         clientFilter === "Todos" || client.status === clientFilter;
       const matchesQuery =
         !query ||
-        `${client.name} ${client.event} ${client.phone} ${client.email}`
+        `${clientReference(client)} ${client.name} ${client.event} ${client.phone} ${client.email}`
           .toLowerCase()
           .includes(query);
       return matchesStatus && matchesQuery;
@@ -3354,6 +3373,7 @@ export default function Home() {
 
         {activeModule === "receipts" && (
           <ReceiptsView
+            clients={clients}
             events={events}
             onDelete={deleteReceipt}
             onDuplicate={duplicateReceipt}
@@ -3776,6 +3796,7 @@ function ClientsView({
             <option>Prospecto</option>
             <option>Cotizado</option>
             <option>Contratado</option>
+            <option>Cerrado</option>
           </select>
         }
       >
@@ -3799,8 +3820,9 @@ function ClientsView({
           </span>
         </div>
         <DataTable
-          headers={["Cliente", "Evento", "Fecha", "Estado", "Acciones"]}
+          headers={["ID cliente", "Cliente", "Evento", "Fecha", "Estado", "Acciones"]}
           rows={clients.map((client) => [
+            clientReference(client),
             <button
               className="text-button"
               key="name"
@@ -3820,6 +3842,7 @@ function ClientsView({
                 title: `Cliente - ${client.name}`,
                 filename: `${client.name}.pdf`,
                 lines: [
+                  `ID cliente: ${clientReference(client)}`,
                   `Telefono: ${client.phone}`,
                   `Correo: ${client.email}`,
                   `Tipo de evento: ${client.event}`,
@@ -3841,6 +3864,7 @@ function ClientsView({
         {selectedClient && (
           <div className="summary-box">
             <h3>Ficha seleccionada</h3>
+            <Detail label="ID cliente" value={clientReference(selectedClient)} />
             <Detail label="Nombre" value={selectedClient.name} />
             <Detail label="Telefono" value={selectedClient.phone} />
             <Detail label="Correo" value={selectedClient.email} />
@@ -4717,6 +4741,7 @@ function QuotePreview({ quote }: Readonly<{ quote: Quote }>) {
 }
 
 function ReceiptsView({
+  clients,
   events,
   onDelete,
   onDuplicate,
@@ -4724,6 +4749,7 @@ function ReceiptsView({
   receipts,
   syncStatus
 }: Readonly<{
+  clients: Client[];
   events: EventRecord[];
   onDelete: (id: string) => Promise<void> | void;
   onDuplicate: (receipt: Receipt) => Promise<void> | void;
@@ -4996,7 +5022,7 @@ function ReceiptsView({
             </button>
           }
         >
-          <ReceiptForm draft={draft} events={events} onCancel={() => setDraft(blankReceipt)} onChange={setDraft} onSubmit={submit} receipts={receipts} />
+          <ReceiptForm clients={clients} draft={draft} events={events} onCancel={() => setDraft(blankReceipt)} onChange={setDraft} onSubmit={submit} receipts={receipts} />
         </Panel>
       )}
 
@@ -5742,15 +5768,33 @@ function ClientForm({
 }: FormProps<Client>) {
   return (
     <form className="form-grid" onSubmit={onSubmit}>
+      <label className="field full">
+        <span>ID cliente automatico</span>
+        <input className="input" readOnly value={clientReference(draft)} />
+      </label>
       <Input label="Nombre" value={draft.name} onChange={(name) => onChange({ ...draft, name })} />
       <Input label="Telefono" value={draft.phone} onChange={(phone) => onChange({ ...draft, phone })} />
       <Input label="Correo" value={draft.email} onChange={(email) => onChange({ ...draft, email })} />
-      <Input label="Tipo de evento" value={draft.event} onChange={(event) => onChange({ ...draft, event })} />
+      <label className="field">
+        <span>Tipo de evento</span>
+        <select className="input" onChange={(event) => onChange({ ...draft, event: event.target.value })} value={draft.event}>
+          {["Boda", "Quinceanos", "Cumpleanos", "Corporativo", "Evento social", "Religioso"].map((eventType) => (
+            <option key={eventType}>{eventType}</option>
+          ))}
+        </select>
+      </label>
       <Input label="Fecha" value={draft.date} onChange={(date) => onChange({ ...draft, date })} />
       <Input label="Lugar" value={draft.place} onChange={(place) => onChange({ ...draft, place })} />
       <Input label="Invitados" type="number" value={`${draft.guests}`} onChange={(guests) => onChange({ ...draft, guests: Number(guests) })} />
       <Input label="Presupuesto" value={draft.budget} onChange={(budget) => onChange({ ...draft, budget })} />
-      <Input label="Estado" value={draft.status} onChange={(status) => onChange({ ...draft, status })} />
+      <label className="field">
+        <span>Estado</span>
+        <select className="input" onChange={(event) => onChange({ ...draft, status: event.target.value })} value={draft.status}>
+          {["Prospecto", "Cotizado", "Contratado", "Cerrado"].map((status) => (
+            <option key={status}>{status}</option>
+          ))}
+        </select>
+      </label>
       <Input label="Seguimiento" value={draft.next} onChange={(next) => onChange({ ...draft, next })} />
       <FormActions isEditing={Boolean(draft.id)} onCancel={onCancel} />
     </form>
@@ -5866,6 +5910,7 @@ function VendorForm({ draft, onCancel, onChange, onSubmit }: FormProps<Vendor>) 
 }
 
 function ReceiptForm({
+  clients,
   draft,
   events,
   onCancel,
@@ -5873,6 +5918,7 @@ function ReceiptForm({
   onSubmit,
   receipts
 }: Readonly<{
+  clients: Client[];
   draft: Receipt;
   events: EventRecord[];
   onCancel: () => void;
@@ -5880,6 +5926,19 @@ function ReceiptForm({
   onSubmit: (event: FormEvent) => void;
   receipts: Receipt[];
 }>) {
+  const selectedClient = clients.find(
+    (client) =>
+      clientReference(client) === draft.accountNumber ||
+      normalizeText(client.name) === normalizeText(draft.client)
+  );
+  const selectedClientId = selectedClient?.id ?? (draft.client ? "__current" : "");
+  const relatedEvents = selectedClient
+    ? events.filter(
+        (eventRecord) =>
+          normalizeText(eventRecord.clientName) === normalizeText(selectedClient.name)
+      )
+    : events;
+
   function updateItem(id: string, patch: Partial<ReceiptItem>) {
     onChange({
       ...draft,
@@ -5903,6 +5962,52 @@ function ReceiptForm({
     });
   }
 
+  function selectClient(clientId: string) {
+    if (clientId === "__current") return;
+    const client = clients.find((clientItem) => clientItem.id === clientId);
+    if (!client) {
+      onChange({
+        ...draft,
+        accountNumber: "",
+        client: "",
+        clientEmail: "",
+        clientPhone: "",
+        eventDate: "",
+        eventId: "",
+        eventName: "",
+        eventPlace: ""
+      });
+      return;
+    }
+
+    const eventRecord = events.find(
+      (eventItem) => normalizeText(eventItem.clientName) === normalizeText(client.name)
+    );
+    const hasBlankItem = draft.items.length === 1 && !draft.items[0].description;
+
+    onChange({
+      ...draft,
+      accountNumber: clientReference(client),
+      client: client.name,
+      clientEmail: client.email,
+      clientPhone: client.phone,
+      eventDate: eventRecord?.date || client.date,
+      eventId: eventRecord?.id || "",
+      eventName: eventRecord?.name || client.event,
+      eventPlace: eventRecord?.venue || client.place,
+      items: hasBlankItem
+        ? [
+            {
+              ...draft.items[0],
+              description: `Pago de ${eventRecord?.name || client.event}`
+            }
+          ]
+        : draft.items,
+      paymentDueDate: draft.paymentDueDate || eventRecord?.paymentDeadline || "",
+      paymentMethod: eventRecord?.paymentMethod || draft.paymentMethod || "ACH"
+    });
+  }
+
   function selectEvent(eventId: string) {
     const eventRecord = events.find((eventItem) => eventItem.id === eventId);
     if (!eventRecord) {
@@ -5910,12 +6015,19 @@ function ReceiptForm({
       return;
     }
 
+    const client = clients.find(
+      (clientItem) =>
+        normalizeText(clientItem.name) === normalizeText(eventRecord.clientName)
+    );
+
     onChange({
       ...draft,
-      accountNumber: draft.accountNumber || `VE-${(draft.receiptNumber || nextReceiptNumber(receipts)).replace("REC-", "").padStart(6, "0")}`,
-      client: eventRecord.clientName,
-      clientEmail: eventRecord.clientEmail,
-      clientPhone: eventRecord.clientPhone,
+      accountNumber: client
+        ? clientReference(client)
+        : draft.accountNumber || `VE-${(draft.receiptNumber || nextReceiptNumber(receipts)).replace("REC-", "").padStart(6, "0")}`,
+      client: client?.name || eventRecord.clientName,
+      clientEmail: client?.email || eventRecord.clientEmail,
+      clientPhone: client?.phone || eventRecord.clientPhone,
       eventDate: eventRecord.date,
       eventId,
       eventName: eventRecord.name,
@@ -5949,12 +6061,15 @@ function ReceiptForm({
             <span>Evento relacionado</span>
             <select className="input" onChange={(event) => selectEvent(event.target.value)} value={draft.eventId}>
               <option value="">Seleccionar evento</option>
-              {events.map((eventRecord) => (
+              {relatedEvents.map((eventRecord) => (
                 <option key={eventRecord.id} value={eventRecord.id}>{eventRecord.name}</option>
               ))}
             </select>
           </label>
-          <Input label="No. cuenta / referencia" value={draft.accountNumber} onChange={(accountNumber) => onChange({ ...draft, accountNumber })} />
+          <label className="field">
+            <span>ID cliente / referencia</span>
+            <input className="input" readOnly value={draft.accountNumber} />
+          </label>
           <Input label="Fecha de emision" value={draft.issueDate} onChange={(issueDate) => onChange({ ...draft, issueDate })} />
           <Input label="Fecha limite de pago" value={draft.paymentDueDate} onChange={(paymentDueDate) => onChange({ ...draft, paymentDueDate })} />
           <label className="field">
@@ -5969,13 +6084,29 @@ function ReceiptForm({
       <div className="form-section full">
         <h3>Cliente y evento</h3>
         <div className="form-grid">
-          <Input label="Cliente" value={draft.client} onChange={(client) => onChange({ ...draft, client })} />
+          <label className="field">
+            <span>Cliente</span>
+            <select className="input" onChange={(event) => selectClient(event.target.value)} required value={selectedClientId}>
+              <option value="">Seleccionar cliente</option>
+              {draft.client && !selectedClient && <option value="__current">{draft.client} (registro anterior)</option>}
+              {clients.map((client) => (
+                <option key={client.id} value={client.id}>{client.name} - {clientReference(client)}</option>
+              ))}
+            </select>
+          </label>
           <Input label="Correo" value={draft.clientEmail} onChange={(clientEmail) => onChange({ ...draft, clientEmail })} />
           <Input label="Telefono" value={draft.clientPhone} onChange={(clientPhone) => onChange({ ...draft, clientPhone })} />
           <Input label="Nombre del evento" value={draft.eventName} onChange={(eventName) => onChange({ ...draft, eventName })} />
           <Input label="Fecha del evento" value={draft.eventDate} onChange={(eventDate) => onChange({ ...draft, eventDate })} />
           <Input label="Lugar del evento" value={draft.eventPlace} onChange={(eventPlace) => onChange({ ...draft, eventPlace })} />
-          <Input label="Metodo de pago" value={draft.paymentMethod} onChange={(paymentMethod) => onChange({ ...draft, paymentMethod })} />
+          <label className="field">
+            <span>Metodo de pago</span>
+            <select className="input" onChange={(event) => onChange({ ...draft, paymentMethod: event.target.value })} value={draft.paymentMethod}>
+              {["ACH", "Efectivo", "Yappy", "Link de pago"].map((paymentMethod) => (
+                <option key={paymentMethod}>{paymentMethod}</option>
+              ))}
+            </select>
+          </label>
         </div>
       </div>
 

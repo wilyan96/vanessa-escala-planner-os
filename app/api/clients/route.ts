@@ -25,7 +25,8 @@ const eventTypeMap: Record<string, EventType> = {
   cumpleanos: EventType.BIRTHDAY,
   cumpleaños: EventType.BIRTHDAY,
   religioso: EventType.RELIGIOUS,
-  social: EventType.SOCIAL
+  social: EventType.SOCIAL,
+  "evento social": EventType.SOCIAL
 };
 
 const clientStatusMap: Record<string, ClientStatus> = {
@@ -106,6 +107,11 @@ function formatMoney(value?: unknown) {
   }).format(Number(value));
 }
 
+function clientNumberFromId(id: string) {
+  const suffix = id.replace(/[^a-z0-9]/gi, "").slice(-8).toUpperCase();
+  return `CLI-${suffix}`;
+}
+
 async function getOrganization() {
   const existing = await prisma.organization.findFirst({
     where: {
@@ -125,6 +131,7 @@ async function getOrganization() {
 function toClientResponse(client: Awaited<ReturnType<typeof prisma.client.findFirstOrThrow>>) {
   return {
     budget: formatMoney(client.estimatedBudget),
+    clientNumber: clientNumberFromId(client.id),
     date: formatPlannerDate(client.eventDate),
     email: client.email ?? "",
     event: client.eventType === EventType.QUINCEANERA ? "Quinceanos" : client.eventType === EventType.CORPORATE ? "Corporativo" : client.eventType === EventType.BIRTHDAY ? "Cumpleanos" : client.eventType === EventType.RELIGIOUS ? "Religioso" : client.eventType === EventType.SOCIAL ? "Evento social" : "Boda",
