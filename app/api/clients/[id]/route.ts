@@ -51,6 +51,17 @@ function parsePlannerDate(value = "") {
   const normalized = normalize(value);
   if (!normalized) return undefined;
 
+  const pickerMatch = normalized.match(/^(\d{4})-(\d{2})-(\d{2})t(\d{2}):(\d{2})$/);
+  if (pickerMatch) {
+    return new Date(Date.UTC(
+      Number(pickerMatch[1]),
+      Number(pickerMatch[2]) - 1,
+      Number(pickerMatch[3]),
+      Number(pickerMatch[4]),
+      Number(pickerMatch[5])
+    ));
+  }
+
   const direct = new Date(normalized);
   if (!Number.isNaN(direct.getTime())) return direct;
 
@@ -84,16 +95,12 @@ function parsePlannerDate(value = "") {
   if (!match) return undefined;
   const month = months[match[2]];
   if (month === undefined) return undefined;
-  return new Date(Number(match[3]), month, Number(match[1]));
+  return new Date(Date.UTC(Number(match[3]), month, Number(match[1])));
 }
 
 function formatPlannerDate(value?: Date | null) {
   if (!value) return "";
-  return value.toLocaleDateString("es-PA", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric"
-  });
+  return value.toISOString().slice(0, 16);
 }
 
 function formatMoney(value?: unknown) {

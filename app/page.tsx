@@ -1486,6 +1486,48 @@ function clientReference(client: Pick<Client, "clientNumber" | "id">) {
   return suffix ? `CLI-${suffix}` : "Se genera al guardar";
 }
 
+function toDateTimeLocal(value = "") {
+  if (!value.trim()) return "";
+  const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/);
+  if (isoMatch) {
+    return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}T${isoMatch[4] ?? "00"}:${isoMatch[5] ?? "00"}`;
+  }
+
+  const slashMatch = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2}))?/);
+  if (slashMatch) {
+    const [, day, month, year, hour = "00", minute = "00"] = slashMatch;
+    const candidate = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute));
+    if (
+      candidate.getFullYear() === Number(year) &&
+      candidate.getMonth() === Number(month) - 1 &&
+      candidate.getDate() === Number(day)
+    ) {
+      return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T${hour.padStart(2, "0")}:${minute}`;
+    }
+    return "";
+  }
+
+  const parsed = parsePlannerDate(value);
+  if (!parsed) return "";
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}T${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`;
+}
+
+function displayDateTime(value = "") {
+  const normalized = toDateTimeLocal(value);
+  if (!normalized) return value || "-";
+  const [datePart, timePart] = normalized.split("T");
+  const [year, month, day] = datePart.split("-").map(Number);
+  const [hour, minute] = timePart.split(":").map(Number);
+  return new Date(year, month - 1, day, hour, minute).toLocaleString("es-PA", {
+    day: "2-digit",
+    hour: "numeric",
+    minute: "2-digit",
+    month: "short",
+    year: "numeric"
+  });
+}
+
 function nextQuoteNumber(quotes: Quote[]) {
   const year = new Date().getFullYear();
   const maxSequence = quotes.reduce((max, quote) => {
@@ -1918,7 +1960,7 @@ async function createReceiptPdf(receipt: Receipt) {
   context.fillText(":", 865, 565);
   context.fillStyle = "#374151";
   drawWrappedCanvasText(context, receipt.accountNumber || receipt.receiptNumber || "-", 910, 385, 260, 30);
-  drawWrappedCanvasText(context, receipt.issueDate || "-", 910, 430, 260, 30);
+  drawWrappedCanvasText(context, displayDateTime(receipt.issueDate), 910, 430, 260, 30);
   drawWrappedCanvasText(context, receipt.eventName || "-", 910, 475, 260, 30);
   drawWrappedCanvasText(context, receipt.eventPlace || "-", 910, 520, 260, 30);
   drawWrappedCanvasText(context, receipt.paymentMethod || "-", 910, 565, 260, 30);
@@ -2005,7 +2047,7 @@ async function createReceiptPdf(receipt: Receipt) {
   context.font = "bold 25px Arial";
   context.fillText("Fecha limite de pago:", 132, 1460);
   context.font = "bold 27px Arial";
-  context.fillText(receipt.paymentDueDate || receipt.issueDate || "-", 132, 1498);
+  context.fillText(displayDateTime(receipt.paymentDueDate || receipt.issueDate), 132, 1498);
   context.font = "22px Arial";
   context.fillStyle = "#4b5563";
   drawWrappedCanvasText(context, receipt.notes || "Recibo generado por pago registrado.", 132, 1540, 520, 28);
@@ -3832,7 +3874,7 @@ function ClientsView({
               {client.name}
             </button>,
             client.event,
-            client.date,
+            displayDateTime(client.date),
             <Status key="status" label={client.status} tone="neutral" />,
             <RowActions
               key="actions"
@@ -3846,7 +3888,7 @@ function ClientsView({
                   `Telefono: ${client.phone}`,
                   `Correo: ${client.email}`,
                   `Tipo de evento: ${client.event}`,
-                  `Fecha: ${client.date}`,
+                  `Fecha: ${displayDateTime(client.date)}`,
                   `Lugar: ${client.place}`,
                   `Invitados: ${client.guests}`,
                   `Presupuesto: ${client.budget}`,
@@ -4990,7 +5032,7 @@ function ReceiptsView({
               receipt.client,
               receipt.eventName,
               money(receiptTotals(receipt).total),
-              receipt.issueDate,
+              displayDateTime(receipt.issueDate),
               <ReceiptStatusSelect
                 key="status"
                 onChange={(status) => onSave({ ...receipt, status })}
@@ -5137,7 +5179,7 @@ function ReceiptPreview({ receipt }: Readonly<{ receipt: Receipt }>) {
           </div>
           <dl>
             <div><dt>No. Cuenta</dt><dd>{receipt.accountNumber || receipt.receiptNumber || "-"}</dd></div>
-            <div><dt>Fecha</dt><dd>{receipt.issueDate || "-"}</dd></div>
+            <div><dt>Fecha</dt><dd>{displayDateTime(receipt.issueDate)}</dd></div>
             <div><dt>Evento</dt><dd>{receipt.eventName || "-"}</dd></div>
             <div><dt>Lugar</dt><dd>{receipt.eventPlace || "-"}</dd></div>
             <div><dt>Metodo</dt><dd>{receipt.paymentMethod || "-"}</dd></div>
@@ -5181,7 +5223,7 @@ function ReceiptPreview({ receipt }: Readonly<{ receipt: Receipt }>) {
             <p><span>ITBMS ({receipt.itbmsRate || 0}%)</span><strong>{money(totals.itbms)}</strong></p>
             <p><span>Cargo de entrega</span><strong>{money(totals.deliveryFee)}</strong></p>
             <h3 className="receipt-total">Total recibido <strong>{money(totals.total)}</strong></h3>
-            <p className="receipt-note"><strong>Fecha limite de pago:</strong> {receipt.paymentDueDate || receipt.issueDate || "-"}</p>
+            <p className="receipt-note"><strong>Fecha limite de pago:</strong> {displayDateTime(receipt.paymentDueDate || receipt.issueDate)}</p>
             <p className="receipt-note">{receipt.notes || "Recibo generado por pago registrado."}</p>
           </div>
           <div className="receipt-footer-brand">
@@ -5783,7 +5825,7 @@ function ClientForm({
           ))}
         </select>
       </label>
-      <Input label="Fecha" value={draft.date} onChange={(date) => onChange({ ...draft, date })} />
+      <Input label="Fecha y hora del evento" type="datetime-local" value={toDateTimeLocal(draft.date)} onChange={(date) => onChange({ ...draft, date })} />
       <Input label="Lugar" value={draft.place} onChange={(place) => onChange({ ...draft, place })} />
       <Input label="Invitados" type="number" value={`${draft.guests}`} onChange={(guests) => onChange({ ...draft, guests: Number(guests) })} />
       <Input label="Presupuesto" value={draft.budget} onChange={(budget) => onChange({ ...draft, budget })} />
@@ -5991,7 +6033,7 @@ function ReceiptForm({
       client: client.name,
       clientEmail: client.email,
       clientPhone: client.phone,
-      eventDate: eventRecord?.date || client.date,
+      eventDate: toDateTimeLocal(eventRecord?.date || client.date),
       eventId: eventRecord?.id || "",
       eventName: eventRecord?.name || client.event,
       eventPlace: eventRecord?.venue || client.place,
@@ -6003,7 +6045,7 @@ function ReceiptForm({
             }
           ]
         : draft.items,
-      paymentDueDate: draft.paymentDueDate || eventRecord?.paymentDeadline || "",
+      paymentDueDate: toDateTimeLocal(draft.paymentDueDate || eventRecord?.paymentDeadline || ""),
       paymentMethod: eventRecord?.paymentMethod || draft.paymentMethod || "ACH"
     });
   }
@@ -6028,7 +6070,7 @@ function ReceiptForm({
       client: client?.name || eventRecord.clientName,
       clientEmail: client?.email || eventRecord.clientEmail,
       clientPhone: client?.phone || eventRecord.clientPhone,
-      eventDate: eventRecord.date,
+      eventDate: toDateTimeLocal(eventRecord.date),
       eventId,
       eventName: eventRecord.name,
       eventPlace: eventRecord.venue,
@@ -6043,7 +6085,7 @@ function ReceiptForm({
               }
             ]
           : draft.items,
-      paymentDueDate: draft.paymentDueDate || eventRecord.paymentDeadline,
+      paymentDueDate: toDateTimeLocal(draft.paymentDueDate || eventRecord.paymentDeadline),
       paymentMethod: draft.paymentMethod || eventRecord.paymentMethod
     });
   }
@@ -6070,8 +6112,8 @@ function ReceiptForm({
             <span>ID cliente / referencia</span>
             <input className="input" readOnly value={draft.accountNumber} />
           </label>
-          <Input label="Fecha de emision" value={draft.issueDate} onChange={(issueDate) => onChange({ ...draft, issueDate })} />
-          <Input label="Fecha limite de pago" value={draft.paymentDueDate} onChange={(paymentDueDate) => onChange({ ...draft, paymentDueDate })} />
+          <Input label="Fecha y hora de emision" type="datetime-local" value={toDateTimeLocal(draft.issueDate)} onChange={(issueDate) => onChange({ ...draft, issueDate })} />
+          <Input label="Fecha y hora limite de pago" type="datetime-local" value={toDateTimeLocal(draft.paymentDueDate)} onChange={(paymentDueDate) => onChange({ ...draft, paymentDueDate })} />
           <label className="field">
             <span>Estado</span>
             <select className="input" onChange={(event) => onChange({ ...draft, status: event.target.value })} value={draft.status}>
@@ -6097,7 +6139,7 @@ function ReceiptForm({
           <Input label="Correo" value={draft.clientEmail} onChange={(clientEmail) => onChange({ ...draft, clientEmail })} />
           <Input label="Telefono" value={draft.clientPhone} onChange={(clientPhone) => onChange({ ...draft, clientPhone })} />
           <Input label="Nombre del evento" value={draft.eventName} onChange={(eventName) => onChange({ ...draft, eventName })} />
-          <Input label="Fecha del evento" value={draft.eventDate} onChange={(eventDate) => onChange({ ...draft, eventDate })} />
+          <Input label="Fecha y hora del evento" type="datetime-local" value={toDateTimeLocal(draft.eventDate)} onChange={(eventDate) => onChange({ ...draft, eventDate })} />
           <Input label="Lugar del evento" value={draft.eventPlace} onChange={(eventPlace) => onChange({ ...draft, eventPlace })} />
           <label className="field">
             <span>Metodo de pago</span>
